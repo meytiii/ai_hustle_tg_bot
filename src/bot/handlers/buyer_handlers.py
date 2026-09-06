@@ -33,12 +33,7 @@ async def cmd_start(message: Message, state: FSMContext, settings: Settings):
     """Welcomes the user and presents the AI Side Hustle product with launch promotion."""
     await state.clear()
     welcome_text = (
-        f"👋 **Welcome to the Official AI Side Hustle Store!**\n\n"
-        f"Unlock practical, battle-tested strategies to build and scale your profitable digital ventures.\n\n"
-        f"📘 **Product:** AI Side Hustle (Comprehensive PDF Guide)\n"
-        f"💰 **Launch Price:** **${settings.price_usd:g}** (Regular: ~~${settings.original_price_usd:g}~~)\n"
-        f"💎 **Payable in TON:** **{settings.price_ton} TON**\n\n"
-        f"Instant digital delivery directly inside Telegram upon payment confirmation."
+        f"👋 **Welcome!**\n\n"
     )
     await message.answer(
         text=welcome_text,
