@@ -1,0 +1,23 @@
+services:
+  ai_hustle_bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai_hustle_bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+        reservations:
+          memory: 64M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
