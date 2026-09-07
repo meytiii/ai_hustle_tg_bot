@@ -1,0 +1,38 @@
+# Git
+.git/
+.gitignore
+
+# Environment variables and secrets
+.env
+.env.local
+.env.*.local
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env/
+
+# Python cache & compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Testing & coverage
+.pytest_cache/
+.coverage
+htmlcov/
+tests/
+
+# Local SQLite databases & runtime data
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
