@@ -79,8 +79,8 @@ async def test_notification_service_bilingual_dispatch():
     order = Order(
         order_number="ASH-TEST1",
         user_id=11223344,
-        username="buyer_test",
-        full_name="Test Buyer",
+        username="mehdi_kh_278",
+        full_name="Mehdi_Tester",
         amount_usd=79.0,
         amount_ton=12.5,
         wallet_address="EQDtest_wallet",
@@ -92,19 +92,28 @@ async def test_notification_service_bilingual_dispatch():
         expires_at=utc_now(),
     )
 
-    # 1. Owner notification (must be in Persian)
+    # 1. Owner notification (must be in Persian, escaped username, Shamsi date, $79 price)
     await notifier.notify_owner_new_order(mock_bot, order, reply_markup=None)
     owner_msg = sent_messages[-1]
     assert owner_msg["chat_id"] == owner_id
     assert "سفارش جدید جهت بررسی" in owner_msg["caption"]
     assert "هش تراکنش" in owner_msg["caption"]
+    assert r"@mehdi\_kh\_278" in owner_msg["caption"]
+    assert "$79" in owner_msg["caption"]
+    assert "مبلغ سفارش" in owner_msg["caption"]
+    assert "وضعیت:** در انتظار تایید" in owner_msg["caption"]
+    assert "در انتظار تایید مالک" not in owner_msg["caption"]
+    assert "TON" not in owner_msg["caption"].split("مبلغ سفارش")[1].split("\n")[0]
 
-    # 2. Developer completion report (must be in English)
+    # 2. Developer completion report (must be in English, Shamsi date, $79 price without TON)
     await notifier.notify_developer_completed(mock_bot, order)
     dev_msg = sent_messages[-1]
     assert dev_msg["chat_id"] == dev_id
     assert "[SALES REPORT: APPROVED]" in dev_msg["text"]
     assert "ASH-TEST1" in dev_msg["text"]
+    assert r"@mehdi\_kh\_278" in dev_msg["text"]
+    assert "• **Amount:** $79" in dev_msg["text"]
+    assert "(Tehran)" in dev_msg["text"]
 
     # 3. Buyer rejection notice (must be in English)
     await notifier.notify_buyer_rejected(

@@ -116,7 +116,7 @@ async def cb_buy_now(
     payment_instructions = (
         f"🧾 **Order Summary: `#{order.order_number}`**\n\n"
         f"• **Product:** AI Side Hustle (PDF Guide)\n"
-        f"• **Amount Due:** **{order.amount_ton} TON** (~${order.amount_usd:g})\n\n"
+        f"• **Amount Due:** **${order.amount_usd:g}**\n\n"
         f"📥 **Send TON to the following wallet address:**\n"
         f"`{order.wallet_address}`\n\n"
         f"_(Tap the address above to copy it to your clipboard)_\n\n"

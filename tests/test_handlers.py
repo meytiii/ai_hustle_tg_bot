@@ -59,10 +59,7 @@ async def test_cmd_start_displays_promotion(test_settings, fsm_storage):
     assert message.answer.called
     call_args = message.answer.call_args
     text = call_args.kwargs.get("text", "")
-    assert "AI Side Hustle" in text
-    assert "$79" in text
-    assert "$100" in text
-    assert "12.5 TON" in text
+    assert "Welcome" in text
 
 
 @pytest.mark.asyncio

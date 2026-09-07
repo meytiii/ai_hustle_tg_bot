@@ -9,6 +9,7 @@ from src.database.session import close_db, init_db
 def test_settings_validation():
     """Verifies Settings properly validates mandatory fields and defaults."""
     settings = Settings(
+        _env_file=None,
         bot_token="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
         ton_wallet_address="EQDtest_wallet_address_12345",
     )

@@ -1,13 +1,40 @@
 """Notification service handling bilingual notifications (EN for Buyer/Dev, FA for Owner)."""
 
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramAPIError
 from aiogram.types import InlineKeyboardMarkup
+import jdatetime
 
 from src.database.models import Order
 from src.utils.logger import logger
+
+# Tehran Timezone configuration (with fallback for systems without tzdata)
+try:
+    from zoneinfo import ZoneInfo
+    TEHRAN_TZ = ZoneInfo("Asia/Tehran")
+except Exception:
+    TEHRAN_TZ = timezone(timedelta(hours=3, minutes=30))
+
+
+def escape_md(text: Optional[str]) -> str:
+    """Escapes Markdown special characters to prevent broken formatting like italics from underscores."""
+    if not text:
+        return ""
+    for ch in ("_", "*", "`", "["):
+        text = text.replace(ch, f"\\{ch}")
+    return text
+
+
+def format_shamsi_datetime(dt: datetime) -> str:
+    """Converts a UTC datetime to a Hijri Shamsi (Jalali) string in Tehran timezone."""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    tehran_dt = dt.astimezone(TEHRAN_TZ)
+    shamsi_dt = jdatetime.datetime.fromgregorian(datetime=tehran_dt)
+    return shamsi_dt.strftime("%Y/%m/%d %H:%M:%S")
 
 
 class NotificationService:
@@ -24,18 +51,19 @@ class NotificationService:
         reply_markup: InlineKeyboardMarkup,
     ) -> Optional[int]:
         """Sends new order submission card in Persian (FA) to the Owner with the attached receipt screenshot."""
-        buyer_handle = f"@{order.username}" if order.username else "ندارد"
-        created_str = order.created_at.strftime("%Y-%m-%d %H:%M:%S UTC")
+        buyer_handle = f"@{escape_md(order.username)}" if order.username else "ندارد"
+        buyer_name = escape_md(order.full_name)
+        shamsi_date = format_shamsi_datetime(order.created_at)
 
         caption = (
             f"🔔 **سفارش جدید جهت بررسی و تایید**\n\n"
             f"🏷️ **شماره سفارش:** `{order.order_number}`\n"
-            f"👤 **خریدار:** {order.full_name} ({buyer_handle})\n"
+            f"👤 **خریدار:** {buyer_name} ({buyer_handle})\n"
             f"🆔 **شناسه تلگرام خریدار:** `{order.user_id}`\n\n"
-            f"💰 **مبلغ سفارش:** {order.amount_ton} TON (${order.amount_usd})\n"
+            f"💰 **مبلغ سفارش:** ${order.amount_usd:g}\n"
             f"🔗 **هش تراکنش:**\n`{order.tx_hash}`\n\n"
-            f"📅 **تاریخ ثبت:** {created_str}\n"
-            f"📌 **وضعیت:** در انتظار تایید مالک\n\n"
+            f"📅 **تاریخ ثبت:** {shamsi_date}\n"
+            f"📌 **وضعیت:** در انتظار تایید\n\n"
             f"لطفاً ولت خود را بررسی نموده و تصمیم خود را ثبت نمایید:"
         )
 
@@ -96,16 +124,19 @@ class NotificationService:
 
     async def notify_developer_completed(self, bot: Bot, order: Order) -> None:
         """Sends completed order report in English to the Developer."""
-        buyer_handle = f"@{order.username}" if order.username else "N/A"
+        buyer_handle = f"@{escape_md(order.username)}" if order.username else "N/A"
+        buyer_name = escape_md(order.full_name)
+        shamsi_date = format_shamsi_datetime(order.updated_at)
+
         text = (
             f"📊 **[SALES REPORT: APPROVED]**\n"
             f"• **Order:** `{order.order_number}`\n"
-            f"• **Buyer:** {order.full_name} ({buyer_handle})\n"
+            f"• **Buyer:** {buyer_name} ({buyer_handle})\n"
             f"• **Buyer ID:** `{order.user_id}`\n"
-            f"• **Amount:** {order.amount_ton} TON (${order.amount_usd})\n"
+            f"• **Amount:** ${order.amount_usd:g}\n"
             f"• **TX Hash:** `{order.tx_hash}`\n"
             f"• **Status:** APPROVED & DELIVERED\n"
-            f"• **Timestamp:** {order.updated_at.strftime('%Y-%m-%d %H:%M:%S UTC')}"
+            f"• **Timestamp:** {shamsi_date} (Tehran)"
         )
         try:
             await bot.send_message(chat_id=self.developer_id, text=text, parse_mode="Markdown")
@@ -114,15 +145,18 @@ class NotificationService:
 
     async def notify_developer_rejected(self, bot: Bot, order: Order, reason: str) -> None:
         """Sends rejection report in English to the Developer."""
-        buyer_handle = f"@{order.username}" if order.username else "N/A"
+        buyer_handle = f"@{escape_md(order.username)}" if order.username else "N/A"
+        buyer_name = escape_md(order.full_name)
+        shamsi_date = format_shamsi_datetime(order.updated_at)
+
         text = (
             f"⚠️ **[SALES REPORT: REJECTED]**\n"
             f"• **Order:** `{order.order_number}`\n"
-            f"• **Buyer:** {order.full_name} ({buyer_handle})\n"
+            f"• **Buyer:** {buyer_name} ({buyer_handle})\n"
             f"• **Buyer ID:** `{order.user_id}`\n"
             f"• **Reason:** {reason}\n"
             f"• **Status:** REJECTED\n"
-            f"• **Timestamp:** {order.updated_at.strftime('%Y-%m-%d %H:%M:%S UTC')}"
+            f"• **Timestamp:** {shamsi_date} (Tehran)"
         )
         try:
             await bot.send_message(chat_id=self.developer_id, text=text, parse_mode="Markdown")
