@@ -4,11 +4,25 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 
 def get_start_keyboard() -> InlineKeyboardMarkup:
-    """Keyboard on the welcome screen with the primary purchase action."""
+    """Keyboard on the welcome screen with the primary purchase action and support."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="🚀 Buy Now — Launch Discount", callback_data="buy_now"),
+                InlineKeyboardButton(text="🚀 Buy Now", callback_data="buy_now"),
+            ],
+            [
+                InlineKeyboardButton(text="💬 Contact Support", callback_data="contact_support"),
+            ],
+        ]
+    )
+
+
+def get_cancel_support_keyboard() -> InlineKeyboardMarkup:
+    """Allows the user to cancel contacting support."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="❌ Cancel", callback_data="cancel_support"),
             ]
         ]
     )

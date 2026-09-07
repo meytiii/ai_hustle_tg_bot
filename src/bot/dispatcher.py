@@ -8,6 +8,7 @@ from aiogram.types import ErrorEvent
 from src.bot.handlers import buyer_handlers, common_handlers, owner_handlers
 from src.bot.middlewares.auth_middleware import OwnerAuthMiddleware
 from src.bot.middlewares.db_middleware import DatabaseSessionMiddleware
+from src.bot.middlewares.reaction_middleware import ReactionMiddleware
 from src.config import Settings
 from src.services.notification_service import NotificationService
 from src.utils.logger import logger
@@ -18,7 +19,10 @@ def setup_dispatcher(settings: Settings) -> Dispatcher:
     # Lightweight memory storage for FSM (minimal RAM consumption on free tier)
     dp = Dispatcher(storage=MemoryStorage())
 
-    # 1. Register Database & Service Dependency Injection as outer middleware
+    # 1. Automatically react with salute emoji (🫡) to all incoming messages
+    dp.message.outer_middleware(ReactionMiddleware())
+
+    # 2. Register Database & Service Dependency Injection as outer middleware
     dp.update.outer_middleware(DatabaseSessionMiddleware(settings))
 
     # 2. Register Owner Authorization Guard on owner router

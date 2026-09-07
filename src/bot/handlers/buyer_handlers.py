@@ -7,12 +7,16 @@ from aiogram.types import CallbackQuery, Message
 
 from src.bot.keyboards.buyer_keyboards import (
     get_cancel_submission_keyboard,
+    get_cancel_support_keyboard,
     get_order_payment_keyboard,
     get_retry_keyboard,
     get_start_keyboard,
 )
-from src.bot.keyboards.owner_keyboards import get_owner_review_keyboard
-from src.bot.states import BuyerOrderStates
+from src.bot.keyboards.owner_keyboards import (
+    get_owner_review_keyboard,
+    get_owner_support_reply_keyboard,
+)
+from src.bot.states import BuyerOrderStates, BuyerSupportStates
 from src.config import Settings
 from src.database.models import OrderStatus
 from src.services.notification_service import NotificationService
@@ -289,3 +293,79 @@ async def cb_cancel_order(callback: CallbackQuery, state: FSMContext, order_serv
     except Exception as e:
         logger.warning(f"Could not cancel order {order_number}: {e}")
         await callback.answer("Order was already cancelled or expired.", show_alert=True)
+
+
+@router.message(Command("support"))
+@router.message(Command("contact"))
+@router.callback_query(F.data == "contact_support")
+async def start_contact_support(event: Message | CallbackQuery, state: FSMContext):
+    """Prompts the user to type and send their message for support."""
+    await state.set_state(BuyerSupportStates.waiting_for_message)
+    prompt_text = (
+        "💬 **Contact Support**\n\n"
+        "Please type and send your question or message below.\n"
+        "Our team will receive your message and reply directly in this chat:"
+    )
+    if isinstance(event, CallbackQuery):
+        await event.answer()
+        await event.message.answer(
+            text=prompt_text,
+            parse_mode="Markdown",
+            reply_markup=get_cancel_support_keyboard(),
+        )
+    else:
+        await event.answer(
+            text=prompt_text,
+            parse_mode="Markdown",
+            reply_markup=get_cancel_support_keyboard(),
+        )
+
+
+@router.message(BuyerSupportStates.waiting_for_message)
+async def process_support_message(
+    message: Message,
+    state: FSMContext,
+    notification_service: NotificationService,
+    bot: Bot,
+):
+    """Processes the user's message and delivers it to the Owner."""
+    text = message.text or message.caption or ""
+    if not text.strip():
+        await message.answer("⚠️ Please provide a text message for support.")
+        return
+
+    await state.clear()
+    user = message.from_user
+    owner_markup = get_owner_support_reply_keyboard(user.id)
+
+    delivered = await notification_service.notify_owner_support_message(
+        bot=bot,
+        user_id=user.id,
+        username=user.username,
+        full_name=user.full_name or "Customer",
+        message_text=text.strip(),
+        reply_markup=owner_markup,
+    )
+
+    if delivered:
+        await message.answer(
+            "✅ **Message Sent!**\n\n"
+            "Your message has been delivered to our team. We will review it and reply directly to you right here in this chat.",
+            reply_markup=get_start_keyboard(),
+        )
+    else:
+        await message.answer(
+            "⚠️ An error occurred while sending your message. Please try again later.",
+            reply_markup=get_start_keyboard(),
+        )
+
+
+@router.callback_query(F.data == "cancel_support")
+async def cb_cancel_support(callback: CallbackQuery, state: FSMContext):
+    """Cancels support contact and returns to main menu."""
+    await state.clear()
+    await callback.answer("Support request cancelled.")
+    await callback.message.answer(
+        "Support request cancelled.",
+        reply_markup=get_start_keyboard(),
+    )

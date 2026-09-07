@@ -198,3 +198,72 @@ async def test_owner_rejection_preset_flow(order_service: OrderService, test_set
     buyer_text = call_matches[0].kwargs.get("text", "")
     assert "could not be located on the TON blockchain" in buyer_text
     assert f"#{order.order_number}" in buyer_text
+
+
+@pytest.mark.asyncio
+async def test_support_message_and_reply_flow(test_settings, fsm_storage):
+    """Tests buyer contacting support and owner replying back."""
+    from src.bot.handlers.buyer_handlers import process_support_message, start_contact_support
+    from src.bot.handlers.owner_handlers import cb_support_reply, process_owner_support_reply
+    from src.bot.states import BuyerSupportStates, OwnerSupportStates
+
+    bot = AsyncMock()
+    notifier = NotificationService(owner_id=test_settings.owner_id, developer_id=test_settings.developer_id)
+
+    buyer_user = User(id=55555, is_bot=False, first_name="Mehdi_Test", username="test_buyer_handle")
+    buyer_state = create_fsm_context(fsm_storage, user_id=buyer_user.id)
+
+    # 1. Buyer triggers Contact Support
+    cb_support = MagicMock(spec=CallbackQuery)
+    cb_support.from_user = buyer_user
+    cb_support.message = MagicMock()
+    cb_support.message.answer = AsyncMock()
+    cb_support.answer = AsyncMock()
+
+    await start_contact_support(cb_support, buyer_state)
+    assert await buyer_state.get_state() == BuyerSupportStates.waiting_for_message.state
+
+    # 2. Buyer sends support message
+    msg_support = MagicMock(spec=Message)
+    msg_support.from_user = buyer_user
+    msg_support.text = "Hello, how long does manual verification take?"
+    msg_support.caption = None
+    msg_support.answer = AsyncMock()
+
+    await process_support_message(msg_support, buyer_state, notifier, bot)
+    assert await buyer_state.get_state() is None
+
+    # Verify Owner received notification in Persian
+    assert bot.send_message.called
+    owner_call = [c for c in bot.send_message.call_args_list if c.kwargs.get("chat_id") == test_settings.owner_id]
+    assert len(owner_call) > 0
+    owner_text = owner_call[-1].kwargs.get("text", "")
+    assert "پیام جدید از بخش پشتیبانی" in owner_text
+    assert "Hello, how long does manual verification take?" in owner_text
+
+    # 3. Owner clicks Reply button
+    owner_state = create_fsm_context(fsm_storage, user_id=test_settings.owner_id)
+    cb_reply = MagicMock(spec=CallbackQuery)
+    cb_reply.data = f"support_reply:{buyer_user.id}"
+    cb_reply.message = MagicMock()
+    cb_reply.message.answer = AsyncMock()
+    cb_reply.answer = AsyncMock()
+
+    await cb_support_reply(cb_reply, owner_state)
+    assert await owner_state.get_state() == OwnerSupportStates.waiting_for_reply.state
+
+    # 4. Owner types reply
+    msg_owner_reply = MagicMock(spec=Message)
+    msg_owner_reply.text = "Verification usually takes between 5 to 15 minutes."
+    msg_owner_reply.caption = None
+    msg_owner_reply.answer = AsyncMock()
+
+    await process_owner_support_reply(msg_owner_reply, owner_state, notifier, bot)
+    assert await owner_state.get_state() is None
+
+    # Verify Buyer received the reply in English
+    buyer_delivery = [c for c in bot.send_message.call_args_list if c.kwargs.get("chat_id") == buyer_user.id]
+    assert len(buyer_delivery) > 0
+    buyer_msg_text = buyer_delivery[-1].kwargs.get("text", "")
+    assert "Support Team Response" in buyer_msg_text
+    assert "Verification usually takes between 5 to 15 minutes." in buyer_msg_text

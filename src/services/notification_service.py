@@ -199,3 +199,61 @@ class NotificationService:
             )
         except TelegramAPIError as e:
             logger.warning(f"Failed to deliver rejection message to user {user_id}: {e}")
+
+    async def notify_owner_support_message(
+        self,
+        bot: Bot,
+        user_id: int,
+        username: Optional[str],
+        full_name: str,
+        message_text: str,
+        reply_markup: InlineKeyboardMarkup,
+    ) -> bool:
+        """Forwards a user's support inquiry to the Owner in Persian."""
+        buyer_handle = f"@{escape_md(username)}" if username else "ندارد"
+        buyer_name = escape_md(full_name)
+        shamsi_date = format_shamsi_datetime(datetime.now(timezone.utc))
+
+        caption = (
+            f"📩 **پیام جدید از بخش پشتیبانی**\n\n"
+            f"👤 **کاربر:** {buyer_name} ({buyer_handle})\n"
+            f"🆔 **شناسه عددی:** `{user_id}`\n"
+            f"📅 **تاریخ:** {shamsi_date}\n\n"
+            f"💬 **متن پیام:**\n"
+            f"{message_text}\n\n"
+            f"جهت پاسخ دادن به این کاربر، دکمه زیر را لمس نمایید:"
+        )
+        try:
+            await bot.send_message(
+                chat_id=self.owner_id,
+                text=caption,
+                parse_mode="Markdown",
+                reply_markup=reply_markup,
+            )
+            return True
+        except TelegramAPIError as e:
+            logger.error(f"Failed to forward support message to Owner ({self.owner_id}): {e}")
+            return False
+
+    async def notify_user_support_reply(
+        self,
+        bot: Bot,
+        user_id: int,
+        reply_text: str,
+    ) -> bool:
+        """Delivers the Owner's support response back to the user in English."""
+        text = (
+            f"💬 **Support Team Response:**\n\n"
+            f"{reply_text}\n\n"
+            f"If you have further questions, you can contact support again at any time."
+        )
+        try:
+            await bot.send_message(
+                chat_id=user_id,
+                text=text,
+                parse_mode="Markdown",
+            )
+            return True
+        except TelegramAPIError as e:
+            logger.error(f"Failed to deliver support reply to user {user_id}: {e}")
+            return False

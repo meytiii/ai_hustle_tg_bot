@@ -7,10 +7,11 @@ from aiogram.types import CallbackQuery, Message
 from src.bot.keyboards.buyer_keyboards import get_retry_keyboard
 from src.bot.keyboards.owner_keyboards import (
     REJECTION_PRESET_EXPLANATIONS_EN,
+    get_owner_cancel_reply_keyboard,
     get_owner_reject_presets_keyboard,
     get_owner_review_keyboard,
 )
-from src.bot.states import OwnerReviewStates
+from src.bot.states import OwnerReviewStates, OwnerSupportStates
 from src.database.models import OrderStatus
 from src.services.delivery_service import BuyerBlockedBotError, DeliveryError, DeliveryService
 from src.services.notification_service import NotificationService
@@ -223,3 +224,66 @@ async def process_custom_rejection_reason(
 
     # Notify Developer in English
     await notification_service.notify_developer_rejected(bot, order, custom_reason)
+
+
+@router.callback_query(F.data.startswith("support_reply:"))
+async def cb_support_reply(callback: CallbackQuery, state: FSMContext):
+    """Prompts the owner to type a reply to the customer's support inquiry."""
+    user_id = int(callback.data.split(":")[1])
+    await state.set_state(OwnerSupportStates.waiting_for_reply)
+    await state.update_data(target_user_id=user_id)
+
+    await callback.answer()
+    await callback.message.answer(
+        f"✍️ **لطفاً متن پاسخ خود به کاربر `{user_id}` را ارسال فرمایید:**\n\n"
+        f"این پیام مستقیماً به چت خریدار ارسال خواهد شد.",
+        parse_mode="Markdown",
+        reply_markup=get_owner_cancel_reply_keyboard(),
+    )
+
+
+@router.callback_query(F.data == "cancel_support_reply")
+async def cb_cancel_support_reply(callback: CallbackQuery, state: FSMContext):
+    """Cancels typing a support reply."""
+    await state.clear()
+    await callback.answer("ارسال پاسخ لغو شد.")
+    await callback.message.answer("ارسال پاسخ لغو شد.")
+
+
+@router.message(OwnerSupportStates.waiting_for_reply)
+async def process_owner_support_reply(
+    message: Message,
+    state: FSMContext,
+    notification_service: NotificationService,
+    bot: Bot,
+):
+    """Sends the owner's response to the customer."""
+    data = await state.get_data()
+    target_user_id = data.get("target_user_id")
+    await state.clear()
+
+    reply_text = message.text or message.caption or ""
+    if not reply_text.strip():
+        await message.answer("⚠️ متن پاسخ نمی‌تواند خالی باشد.")
+        return
+
+    if not target_user_id:
+        await message.answer("⚠️ شناسه کاربر یافت نشد.")
+        return
+
+    delivered = await notification_service.notify_user_support_reply(
+        bot=bot,
+        user_id=target_user_id,
+        reply_text=reply_text.strip(),
+    )
+
+    if delivered:
+        await message.answer(
+            f"✅ **پاسخ شما با موفقیت برای کاربر `{target_user_id}` ارسال گردید.**",
+            parse_mode="Markdown",
+        )
+    else:
+        await message.answer(
+            f"⚠️ **ارسال پاسخ ناموفق بود!** ممکن است کاربر ربات را مسدود (بلاک) کرده باشد.",
+            parse_mode="Markdown",
+        )

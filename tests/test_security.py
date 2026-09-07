@@ -76,3 +76,36 @@ async def test_replay_attack_duplicate_hash_rejection(order_service: OrderServic
 
     with pytest.raises(DuplicateTxHashError):
         await order_service.submit_tx_hash(order_attacker.order_number, victim_tx)
+
+
+@pytest.mark.asyncio
+async def test_reaction_middleware_salute():
+    """Verifies that incoming messages receive a salute emoji (🫡) reaction."""
+    from unittest.mock import AsyncMock, MagicMock
+    from src.bot.middlewares.reaction_middleware import ReactionMiddleware, SALUTE_EMOJI
+
+    middleware = ReactionMiddleware()
+    called = False
+
+    async def mock_handler(event, data):
+        nonlocal called
+        called = True
+        return "HandlerExecuted"
+
+    # 1. Successful reaction
+    mock_msg = MagicMock(spec=Message)
+    mock_msg.react = AsyncMock()
+
+    result = await middleware(mock_handler, mock_msg, {})
+    assert result == "HandlerExecuted"
+    assert called is True
+    assert mock_msg.react.called
+    call_args = mock_msg.react.call_args[0][0]
+    assert call_args[0].emoji == SALUTE_EMOJI
+
+    # 2. Resilient to client reaction failure
+    failing_msg = MagicMock(spec=Message)
+    failing_msg.react = AsyncMock(side_effect=Exception("Reactions not supported"))
+
+    result = await middleware(mock_handler, failing_msg, {})
+    assert result == "HandlerExecuted"

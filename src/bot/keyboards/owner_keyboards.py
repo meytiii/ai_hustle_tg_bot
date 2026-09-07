@@ -67,3 +67,31 @@ def get_owner_reject_presets_keyboard(order_number: str) -> InlineKeyboardMarkup
             ],
         ]
     )
+
+
+def get_owner_support_reply_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    """Action button on user support messages allowing the owner to reply."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✍️ پاسخ به این پیام",
+                    callback_data=f"support_reply:{user_id}",
+                )
+            ]
+        ]
+    )
+
+
+def get_owner_cancel_reply_keyboard() -> InlineKeyboardMarkup:
+    """Button allowing the owner to cancel typing a reply."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🔙 انصراف از پاسخ",
+                    callback_data="cancel_support_reply",
+                )
+            ]
+        ]
+    )

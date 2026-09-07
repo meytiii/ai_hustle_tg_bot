@@ -12,3 +12,13 @@ class BuyerOrderStates(StatesGroup):
 class OwnerReviewStates(StatesGroup):
     """States traversed by the owner when entering custom rejection feedback."""
     waiting_for_custom_reason = State()
+
+
+class BuyerSupportStates(StatesGroup):
+    """States traversed by a buyer contacting support."""
+    waiting_for_message = State()
+
+
+class OwnerSupportStates(StatesGroup):
+    """States traversed by the owner replying to a user's support message."""
+    waiting_for_reply = State()
