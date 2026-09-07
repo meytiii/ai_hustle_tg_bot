@@ -1,7 +1,7 @@
 """Buyer interaction handlers (100% English interface)."""
 
 from aiogram import Bot, F, Router
-from aiogram.filters import Command, CommandStart
+from aiogram.filters import Command, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
@@ -15,6 +15,12 @@ from src.bot.keyboards.buyer_keyboards import (
 from src.bot.keyboards.owner_keyboards import (
     get_owner_review_keyboard,
     get_owner_support_reply_keyboard,
+)
+from src.bot.middlewares.reaction_middleware import (
+    SOB_EMOJI,
+    STOP_EMOJI,
+    THUMBS_UP_EMOJI,
+    react_to_message,
 )
 from src.bot.states import BuyerOrderStates, BuyerSupportStates
 from src.config import Settings
@@ -30,6 +36,24 @@ from src.services.order_service import (
 from src.utils.logger import logger
 
 router = Router(name="buyer_router")
+
+
+@router.message(
+    StateFilter(BuyerOrderStates.waiting_for_tx_hash, BuyerOrderStates.waiting_for_receipt),
+    F.text.startswith("/") | (F.text.casefold() == "help"),
+)
+async def intercept_locked_commands(message: Message, state: FSMContext):
+    """Intercepts commands during payment proof submission, locks them, reacts with ✋, and offers cancellation."""
+    data = await state.get_data()
+    order_number = data.get("order_number", "")
+    await react_to_message(message, STOP_EMOJI)
+    await message.answer(
+        "✋ **Proof Submission in Progress**\n\n"
+        "Commands are locked until your Transaction Hash and payment screenshot are received.\n"
+        "Please provide your payment proof to complete your order, or cancel your submission below:",
+        parse_mode="Markdown",
+        reply_markup=get_cancel_submission_keyboard(order_number),
+    )
 
 
 @router.message(CommandStart())
@@ -230,15 +254,17 @@ async def cb_submit_proof(callback: CallbackQuery, state: FSMContext, order_serv
 async def process_tx_hash(message: Message, state: FSMContext, order_service: OrderService):
     """Receives and validates the buyer's TON transaction hash."""
     tx_hash = message.text.strip() if message.text else ""
+    data = await state.get_data()
+    order_number = data.get("order_number")
+
     if not tx_hash or len(tx_hash) < 10:
+        await react_to_message(message, SOB_EMOJI)
         await message.answer(
             "⚠️ Please provide a valid transaction hash (text).",
-            reply_markup=get_retry_keyboard(),
+            reply_markup=get_cancel_submission_keyboard(order_number) if order_number else get_retry_keyboard(),
         )
         return
 
-    data = await state.get_data()
-    order_number = data.get("order_number")
     if not order_number:
         await state.clear()
         await message.answer("Session expired. Please restart your order.", reply_markup=get_retry_keyboard())
@@ -247,11 +273,13 @@ async def process_tx_hash(message: Message, state: FSMContext, order_service: Or
     try:
         await order_service.submit_tx_hash(order_number, tx_hash)
     except DuplicateTxHashError:
+        await react_to_message(message, SOB_EMOJI)
         await message.answer(
             "⚠️ **Duplicate Transaction Detected:**\n\n"
             "This transaction hash has already been submitted for another order. "
             "Please verify your wallet details and send a valid, unsubmitted transaction hash.",
             parse_mode="Markdown",
+            reply_markup=get_cancel_submission_keyboard(order_number),
         )
         return
     except OrderExpiredError:
@@ -267,6 +295,8 @@ async def process_tx_hash(message: Message, state: FSMContext, order_service: Or
         await message.answer(f"⚠️ Error: {e}", reply_markup=get_retry_keyboard())
         return
 
+    # Valid transaction hash accepted!
+    await react_to_message(message, THUMBS_UP_EMOJI)
     await state.set_state(BuyerOrderStates.waiting_for_receipt)
     await message.answer(
         f"✅ Transaction hash recorded!\n\n"
@@ -317,6 +347,8 @@ async def process_receipt(
         await message.answer("⚠️ An error occurred processing your receipt. Please try again.")
         return
 
+    # Valid receipt screenshot accepted!
+    await react_to_message(message, THUMBS_UP_EMOJI)
     await state.clear()
 
     # Inform buyer

@@ -484,3 +484,122 @@ async def test_buyer_commands_buy_and_info(order_service: OrderService, test_set
     assert "$79" in info_text
 
 
+@pytest.mark.asyncio
+async def test_proof_submission_command_locking_and_emoji_reactions(
+    order_service: OrderService,
+    test_settings,
+    fsm_storage,
+):
+    """Verifies that commands are locked during proof submission with ✋,
+
+    invalid/duplicate hashes trigger 😭, and valid submissions trigger 👍.
+    """
+    from src.bot.handlers.buyer_handlers import (
+        intercept_locked_commands,
+        process_receipt,
+        process_tx_hash,
+    )
+    from src.bot.middlewares.reaction_middleware import (
+        SOB_EMOJI,
+        STOP_EMOJI,
+        THUMBS_UP_EMOJI,
+    )
+
+    buyer_user = User(id=990011, is_bot=False, first_name="ReactionTester")
+    state = create_fsm_context(fsm_storage, user_id=buyer_user.id)
+
+    order = await order_service.create_order(
+        user_id=buyer_user.id,
+        username="tester_rx",
+        full_name="Tester",
+        amount_usd=79.0,
+        amount_ton=12.5,
+        wallet_address="EQDtest_wallet",
+    )
+    await state.set_state(BuyerOrderStates.waiting_for_tx_hash)
+    await state.update_data(order_number=order.order_number)
+
+    # 1. User attempts to execute a command (/info) during proof submission
+    cmd_msg = MagicMock(spec=Message)
+    cmd_msg.text = "/info"
+    cmd_msg.answer = AsyncMock()
+    cmd_msg.react = AsyncMock()
+
+    await intercept_locked_commands(cmd_msg, state)
+
+    # Must react with ✋
+    assert cmd_msg.react.called
+    assert cmd_msg.react.call_args[0][0][0].emoji == STOP_EMOJI
+    # Must warn user that commands are locked and provide cancel submission button
+    assert cmd_msg.answer.called
+    lock_text = cmd_msg.answer.call_args[0][0]
+    assert "Commands are locked" in lock_text
+    markup = cmd_msg.answer.call_args.kwargs.get("reply_markup")
+    assert "Cancel Submission" in markup.inline_keyboard[0][0].text
+
+    # 2. User enters invalid short hash -> reacts with 😭
+    bad_hash_msg = MagicMock(spec=Message)
+    bad_hash_msg.text = "short"
+    bad_hash_msg.answer = AsyncMock()
+    bad_hash_msg.react = AsyncMock()
+
+    await process_tx_hash(bad_hash_msg, state, order_service)
+
+    assert bad_hash_msg.react.called
+    assert bad_hash_msg.react.call_args[0][0][0].emoji == SOB_EMOJI
+    assert "valid transaction hash" in bad_hash_msg.answer.call_args[0][0]
+
+    # 3. User enters a duplicate hash -> reacts with 😭
+    # First, simulate another order with this hash in DB
+    other_order = await order_service.create_order(
+        user_id=111222,
+        username="other",
+        full_name="Other",
+        amount_usd=79.0,
+        amount_ton=12.5,
+        wallet_address="EQDtest_wallet",
+    )
+    dup_hash = "already_used_tx_hash_1234567890"
+    await order_service.submit_tx_hash(other_order.order_number, dup_hash)
+
+    dup_hash_msg = MagicMock(spec=Message)
+    dup_hash_msg.text = dup_hash
+    dup_hash_msg.answer = AsyncMock()
+    dup_hash_msg.react = AsyncMock()
+
+    await process_tx_hash(dup_hash_msg, state, order_service)
+
+    assert dup_hash_msg.react.called
+    assert dup_hash_msg.react.call_args[0][0][0].emoji == SOB_EMOJI
+    assert "Duplicate Transaction Detected" in dup_hash_msg.answer.call_args[0][0]
+
+    # 4. User enters valid hash -> reacts with 👍
+    valid_hash_msg = MagicMock(spec=Message)
+    valid_hash_msg.text = "fresh_unique_tx_hash_abcdef9876543210"
+    valid_hash_msg.answer = AsyncMock()
+    valid_hash_msg.react = AsyncMock()
+
+    await process_tx_hash(valid_hash_msg, state, order_service)
+
+    assert valid_hash_msg.react.called
+    assert valid_hash_msg.react.call_args[0][0][0].emoji == THUMBS_UP_EMOJI
+    assert await state.get_state() == BuyerOrderStates.waiting_for_receipt.state
+
+    # 5. User uploads valid receipt screenshot -> reacts with 👍
+    notifier = NotificationService(owner_id=test_settings.owner_id, developer_id=test_settings.developer_id)
+    bot = AsyncMock()
+
+    photo_msg = MagicMock(spec=Message)
+    photo_msg.photo = [MagicMock(file_id="photo_123")]
+    photo_msg.document = None
+    photo_msg.answer = AsyncMock()
+    photo_msg.react = AsyncMock()
+
+    await process_receipt(photo_msg, state, order_service, notifier, bot)
+
+    assert photo_msg.react.called
+    assert photo_msg.react.call_args[0][0][0].emoji == THUMBS_UP_EMOJI
+    assert await state.get_state() is None
+
+
+

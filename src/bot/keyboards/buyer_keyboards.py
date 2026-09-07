@@ -49,12 +49,12 @@ def get_order_payment_keyboard(order_number: str) -> InlineKeyboardMarkup:
 
 
 def get_cancel_submission_keyboard(order_number: str) -> InlineKeyboardMarkup:
-    """Allows the user to cancel their order during receipt submission."""
+    """Allows the user to cancel their order/proof submission."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="❌ Cancel Order",
+                    text="❌ Cancel Submission",
                     callback_data=f"cancel_order:{order_number}",
                 )
             ]

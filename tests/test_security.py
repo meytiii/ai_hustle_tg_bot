@@ -136,6 +136,7 @@ async def test_blocked_user_middleware(order_service: OrderService):
     blocked_user = User(id=blocked_user_id, is_bot=False, first_name="Blocked")
     msg_blocked = MagicMock(spec=Message)
     msg_blocked.answer = AsyncMock()
+    msg_blocked.react = AsyncMock()
 
     called = False
     data_blocked = {"event_from_user": blocked_user, "order_service": order_service}
@@ -143,6 +144,8 @@ async def test_blocked_user_middleware(order_service: OrderService):
 
     assert result is None
     assert called is False
+    assert msg_blocked.react.called
+    assert msg_blocked.react.call_args[0][0][0].emoji == "✋"
     msg_blocked.answer.assert_called_once_with("⚠️ Your account has been suspended.")
 
     # 2. Blocked user sends CallbackQuery
