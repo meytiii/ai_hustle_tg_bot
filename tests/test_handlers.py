@@ -299,3 +299,188 @@ async def test_owner_block_user_callback(order_service: OrderService):
     assert str(target_user_id) in admin_msg
     assert "مسدود شد" in admin_msg
 
+
+@pytest.mark.asyncio
+async def test_owner_blocklist_and_unblock_flow(order_service: OrderService, test_settings):
+    """Tests the /blocklist pagination and unblocking with user notification dispatch."""
+    from src.bot.handlers.owner_handlers import cb_blocklist_page, cb_unblock_user, cmd_blocklist
+
+    bot = AsyncMock()
+    notifier = NotificationService(owner_id=test_settings.owner_id, developer_id=test_settings.developer_id)
+
+    # 1. When no blocked users exist
+    empty_msg = MagicMock(spec=Message)
+    empty_msg.answer = AsyncMock()
+    await cmd_blocklist(empty_msg, order_service)
+    assert "خالی است" in empty_msg.answer.call_args[0][0]
+
+    # 2. Block 12 users to trigger pagination (> 10 items)
+    for i in range(1, 13):
+        await order_service.block_user(user_id=1000 + i, username=f"spammer_{i}", reason="Spam")
+
+    assert await order_service.count_blocked_users() == 12
+
+    # 3. Call /blocklist on page 1
+    page1_msg = MagicMock(spec=Message)
+    page1_msg.answer = AsyncMock()
+    await cmd_blocklist(page1_msg, order_service)
+
+    assert page1_msg.answer.called
+    markup1 = page1_msg.answer.call_args.kwargs["reply_markup"]
+    # 10 user buttons + 1 nav row + 1 close row = 12 rows
+    assert len(markup1.inline_keyboard) == 12
+    # Verify button labels format: @spammer_X (ID)
+    first_btn_text = markup1.inline_keyboard[0][0].text
+    assert "@spammer_" in first_btn_text
+    assert "(" in first_btn_text
+
+    # 4. Navigate to page 2
+    cb_page2 = MagicMock(spec=CallbackQuery)
+    cb_page2.data = "blocklist_page:2"
+    cb_page2.message = MagicMock()
+    cb_page2.message.edit_text = AsyncMock()
+    cb_page2.answer = AsyncMock()
+
+    await cb_blocklist_page(cb_page2, order_service)
+    markup2 = cb_page2.message.edit_text.call_args.kwargs["reply_markup"]
+    # 2 user buttons + 1 nav row + 1 close row = 4 rows
+    assert len(markup2.inline_keyboard) == 4
+
+    # 5. Unblock user 1001
+    cb_unblock = MagicMock(spec=CallbackQuery)
+    cb_unblock.data = "unblock_user:1001:1"
+    cb_unblock.message = MagicMock()
+    cb_unblock.message.edit_text = AsyncMock()
+    cb_unblock.answer = AsyncMock()
+
+    await cb_unblock_user(cb_unblock, order_service, notifier, bot)
+
+    assert await order_service.is_user_blocked(1001) is False
+    assert await order_service.count_blocked_users() == 11
+    # Check alert shown
+    cb_unblock.answer.assert_called_once_with("کاربر با موفقیت رفع مسدودیت شد و پیام به او ارسال گردید.", show_alert=True)
+    # Check notification sent to user 1001
+    assert bot.send_message.called
+    user_notifs = [c for c in bot.send_message.call_args_list if c.kwargs.get("chat_id") == 1001]
+    assert len(user_notifs) > 0
+    assert "Account Reinstated" in user_notifs[0].kwargs.get("text", "")
+
+
+@pytest.mark.asyncio
+async def test_owner_history_flow(order_service: OrderService, test_settings):
+    """Tests /history order listing with pagination (> 10 orders)."""
+    from src.bot.handlers.owner_handlers import cb_history_page, cmd_history
+
+    # 1. Empty history check
+    msg_empty = MagicMock(spec=Message)
+    msg_empty.answer = AsyncMock()
+    await cmd_history(msg_empty, order_service)
+    assert "هیچ سفارشی" in msg_empty.answer.call_args[0][0]
+
+    # 2. Create 12 orders
+    for i in range(1, 13):
+        await order_service.create_order(
+            user_id=2000 + i,
+            username=f"buyer_hist_{i}",
+            full_name=f"Buyer {i}",
+            amount_usd=79.0,
+            amount_ton=12.5,
+            wallet_address="EQDtest_wallet",
+        )
+
+    # 3. Call /history on page 1
+    msg_page1 = MagicMock(spec=Message)
+    msg_page1.answer = AsyncMock()
+    await cmd_history(msg_page1, order_service)
+
+    text1 = msg_page1.answer.call_args[0][0]
+    assert "تاریخچه سفارشات" in text1
+    assert "صفحه 1 از 2" in text1
+    assert "$79" in text1
+
+    markup1 = msg_page1.answer.call_args.kwargs["reply_markup"]
+    assert len(markup1.inline_keyboard) == 2  # Nav row + Close row
+
+    # 4. Navigate to page 2
+    cb_page2 = MagicMock(spec=CallbackQuery)
+    cb_page2.data = "history_page:2"
+    cb_page2.message = MagicMock()
+    cb_page2.message.edit_text = AsyncMock()
+    cb_page2.answer = AsyncMock()
+
+    await cb_history_page(cb_page2, order_service)
+    text2 = cb_page2.message.edit_text.call_args[0][0]
+    assert "صفحه 2 از 2" in text2
+
+
+@pytest.mark.asyncio
+async def test_role_based_help_handler(test_settings):
+    """Verifies that Owner/Dev receive admin help while buyers receive buyer help."""
+    from src.bot.handlers.common_handlers import handle_help
+
+    owner_user = User(id=test_settings.owner_id, is_bot=False, first_name="Owner")
+    dev_user = User(id=test_settings.developer_id, is_bot=False, first_name="Dev")
+    normal_user = User(id=999888777, is_bot=False, first_name="Customer")
+
+    # 1. Owner requests help
+    msg_owner = MagicMock(spec=Message)
+    msg_owner.from_user = owner_user
+    msg_owner.answer = AsyncMock()
+    await handle_help(msg_owner, test_settings)
+    owner_text = msg_owner.answer.call_args.kwargs.get("text", msg_owner.answer.call_args[0][0] if msg_owner.answer.call_args[0] else "")
+    assert "/blocklist" in owner_text
+    assert "/history" in owner_text
+
+    # 2. Developer requests help
+    msg_dev = MagicMock(spec=Message)
+    msg_dev.from_user = dev_user
+    msg_dev.answer = AsyncMock()
+    await handle_help(msg_dev, test_settings)
+    dev_text = msg_dev.answer.call_args.kwargs.get("text", msg_dev.answer.call_args[0][0] if msg_dev.answer.call_args[0] else "")
+    assert "/blocklist" in dev_text
+    assert "/history" in dev_text
+
+    # 3. Normal Buyer requests help
+    msg_buyer = MagicMock(spec=Message)
+    msg_buyer.from_user = normal_user
+    msg_buyer.answer = AsyncMock()
+    await handle_help(msg_buyer, test_settings)
+    buyer_text = msg_buyer.answer.call_args.kwargs.get("text", msg_buyer.answer.call_args[0][0] if msg_buyer.answer.call_args[0] else "")
+    assert "/buy" in buyer_text
+    assert "/info" in buyer_text
+    assert "/contact" in buyer_text
+    assert "/blocklist" not in buyer_text
+
+
+@pytest.mark.asyncio
+async def test_buyer_commands_buy_and_info(order_service: OrderService, test_settings, fsm_storage):
+    """Verifies /buy creates/presents order and /info displays product overview."""
+    from src.bot.handlers.buyer_handlers import cmd_buy, cmd_info
+
+    buyer_user = User(id=333444, is_bot=False, first_name="Sam", username="sam_crypto")
+    state = create_fsm_context(fsm_storage, user_id=buyer_user.id)
+
+    # 1. /buy command
+    msg_buy = MagicMock(spec=Message)
+    msg_buy.from_user = buyer_user
+    msg_buy.answer = AsyncMock()
+    await cmd_buy(msg_buy, state, order_service, test_settings)
+
+    assert msg_buy.answer.called
+    buy_text = msg_buy.answer.call_args.kwargs.get("text", "")
+    assert "Order Summary:" in buy_text
+    assert "$79" in buy_text
+    assert test_settings.ton_wallet_address in buy_text
+
+    # 2. /info command
+    msg_info = MagicMock(spec=Message)
+    msg_info.from_user = buyer_user
+    msg_info.answer = AsyncMock()
+    await cmd_info(msg_info, test_settings)
+
+    assert msg_info.answer.called
+    info_text = msg_info.answer.call_args.kwargs.get("text", "")
+    assert "AI Side Hustle" in info_text
+    assert "$79" in info_text
+
+

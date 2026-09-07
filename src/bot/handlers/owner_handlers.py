@@ -1,20 +1,24 @@
 """Owner administrative handlers (100% Persian / Farsi interface)."""
 
+import math
 from aiogram import Bot, F, Router
+from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from src.bot.keyboards.buyer_keyboards import get_retry_keyboard
 from src.bot.keyboards.owner_keyboards import (
     REJECTION_PRESET_EXPLANATIONS_EN,
+    get_blocklist_keyboard,
+    get_history_pagination_keyboard,
     get_owner_cancel_reply_keyboard,
     get_owner_reject_presets_keyboard,
     get_owner_review_keyboard,
 )
 from src.bot.states import OwnerReviewStates, OwnerSupportStates
-from src.database.models import OrderStatus
+from src.database.models import Order, OrderStatus
 from src.services.delivery_service import BuyerBlockedBotError, DeliveryError, DeliveryService
-from src.services.notification_service import NotificationService
+from src.services.notification_service import NotificationService, escape_md, format_shamsi_datetime
 from src.services.order_service import OrderService, OrderStateError
 from src.utils.logger import logger
 
@@ -289,16 +293,225 @@ async def process_owner_support_reply(
         )
 
 
+STATUS_MAP_FA = {
+    "AWAITING_PAYMENT": "⏳ در انتظار پرداخت",
+    "AWAITING_RECEIPT": "🧾 در انتظار ارسال رسید",
+    "UNDER_REVIEW": "🔍 در انتظار تایید",
+    "APPROVED": "✅ تایید شده",
+    "DELIVERED": "📦 تحویل داده شده",
+    "DELIVERY_FAILED": "⚠️ خطا در ارسال فایل",
+    "REJECTED": "❌ رد شده",
+    "CANCELLED": "🚫 لغو شده توسط خریدار",
+    "EXPIRED": "⏱️ منقضی شده",
+}
+
+
+def format_orders_history_message(orders: list[Order], page: int, total_pages: int, total_count: int) -> str:
+    """Formats a page of orders into a detailed Persian report."""
+    lines = [
+        f"📋 **تاریخچه سفارشات (صفحه {page} از {total_pages} | مجموع: {total_count} سفارش):**\n"
+    ]
+    for idx, order in enumerate(orders, start=(page - 1) * 10 + 1):
+        status_text = STATUS_MAP_FA.get(order.status, order.status)
+        date_str = format_shamsi_datetime(order.created_at)
+        buyer_handle = f"@{escape_md(order.username)}" if order.username else "ندارد"
+        buyer_name = escape_md(order.full_name)
+        tx_display = f"`{order.tx_hash}`" if order.tx_hash else "ثبت نشده"
+
+        entry = (
+            f"🔹 **سفارش #{order.order_number}** (ردیف {idx})\n"
+            f"• 👤 خریدار: {buyer_name} ({buyer_handle})\n"
+            f"• 🆔 شناسه: `{order.user_id}`\n"
+            f"• 💰 مبلغ: ${order.amount_usd:g}\n"
+            f"• 📌 وضعیت: {status_text}\n"
+            f"• 📅 تاریخ: {date_str}\n"
+            f"• 🔗 هش تراکنش: {tx_display}"
+        )
+        if order.rejection_reason:
+            entry += f"\n• ⚠️ دلیل رد: _{escape_md(order.rejection_reason)}_"
+        lines.append(entry)
+
+    return "\n\n".join(lines)
+
+
 @router.callback_query(F.data.startswith("block_user:"))
-async def cb_block_user(callback: CallbackQuery, order_service: OrderService):
-    """Blocks a user and confirms to the owner."""
+async def cb_block_user(
+    callback: CallbackQuery,
+    order_service: OrderService,
+    bot: Bot | None = None,
+):
+    """Blocks a user, captures their username if available, and confirms to the owner."""
     user_id = int(callback.data.split(":")[1])
-    await order_service.block_user(user_id)
+    active_bot = bot or getattr(callback, "bot", None)
+    username = None
+    if active_bot:
+        try:
+            chat = await active_bot.get_chat(user_id)
+            username = chat.username
+        except Exception:
+            pass
+
+    await order_service.block_user(user_id=user_id, username=username)
 
     await callback.answer("کاربر با موفقیت مسدود شد.", show_alert=True)
     await callback.message.edit_reply_markup(reply_markup=None)
     await callback.message.answer(
         f"🚫 **کاربر با شناسه `{user_id}` مسدود شد.**\n\n"
-        f"این کاربر دیگر قادر به ارسال پیام به پشتیبانی یا خرید از ربات نخواهد بود.",
+        f"این کاربر دیگر قادر به ارسال پیام به پشتیبانی یا خرید از ربات نخواهد بود.\n"
+        f"جهت مدیریت یا رفع مسدودیت کاربران، از دستور /blocklist استفاده فرمایید.",
         parse_mode="Markdown",
     )
+
+
+@router.message(Command("blocklist"))
+async def cmd_blocklist(message: Message, order_service: OrderService):
+    """Displays a paginated list of blocked users with inline unblock buttons."""
+    total_count = await order_service.count_blocked_users()
+    if total_count == 0:
+        await message.answer(
+            "✅ **لیست کاربران مسدود شده خالی است.**\n\nدر حال حاضر هیچ کاربری در لیست مسدودشده‌ها قرار ندارد.",
+            parse_mode="Markdown",
+        )
+        return
+
+    page = 1
+    total_pages = max(1, math.ceil(total_count / 10))
+    users = await order_service.get_blocked_users(offset=0, limit=10)
+    markup = get_blocklist_keyboard(users, page=page, total_pages=total_pages)
+    await message.answer(
+        f"🚫 **لیست کاربران مسدود شده** (صفحه {page} از {total_pages} | مجموع: {total_count} کاربر):\n\n"
+        f"جهت **رفع مسدودیت (Unlock)** هر کاربر، روی دکمه مربوط به آن کلیک نمایید:",
+        reply_markup=markup,
+        parse_mode="Markdown",
+    )
+
+
+@router.callback_query(F.data.startswith("blocklist_page:"))
+async def cb_blocklist_page(callback: CallbackQuery, order_service: OrderService):
+    """Handles pagination navigation for the blocklist."""
+    page = int(callback.data.split(":")[1])
+    total_count = await order_service.count_blocked_users()
+    if total_count == 0:
+        await callback.message.edit_text(
+            "✅ **لیست کاربران مسدود شده خالی است.**",
+            parse_mode="Markdown",
+        )
+        await callback.answer()
+        return
+
+    total_pages = max(1, math.ceil(total_count / 10))
+    if page < 1:
+        page = 1
+    elif page > total_pages:
+        page = total_pages
+
+    users = await order_service.get_blocked_users(offset=(page - 1) * 10, limit=10)
+    markup = get_blocklist_keyboard(users, page=page, total_pages=total_pages)
+    await callback.message.edit_text(
+        f"🚫 **لیست کاربران مسدود شده** (صفحه {page} از {total_pages} | مجموع: {total_count} کاربر):\n\n"
+        f"جهت **رفع مسدودیت (Unlock)** هر کاربر، روی دکمه مربوط به آن کلیک نمایید:",
+        reply_markup=markup,
+        parse_mode="Markdown",
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("unblock_user:"))
+async def cb_unblock_user(
+    callback: CallbackQuery,
+    order_service: OrderService,
+    notification_service: NotificationService,
+    bot: Bot,
+):
+    """Unblocks a user, notifies them in English, and updates the blocklist message."""
+    parts = callback.data.split(":")
+    user_id = int(parts[1])
+    page = int(parts[2]) if len(parts) > 2 else 1
+
+    unblocked = await order_service.unblock_user(user_id)
+    if unblocked:
+        await notification_service.notify_user_unblocked(bot=bot, user_id=user_id)
+        await callback.answer("کاربر با موفقیت رفع مسدودیت شد و پیام به او ارسال گردید.", show_alert=True)
+    else:
+        await callback.answer("این کاربر در حال حاضر مسدود نیست.", show_alert=True)
+
+    # Refresh blocklist view
+    total_count = await order_service.count_blocked_users()
+    if total_count == 0:
+        await callback.message.edit_text(
+            "✅ **لیست کاربران مسدود شده خالی است.**\n\nتمام کاربران با موفقیت رفع مسدودیت شدند.",
+            parse_mode="Markdown",
+        )
+        return
+
+    total_pages = max(1, math.ceil(total_count / 10))
+    if page > total_pages:
+        page = total_pages
+
+    users = await order_service.get_blocked_users(offset=(page - 1) * 10, limit=10)
+    markup = get_blocklist_keyboard(users, page=page, total_pages=total_pages)
+    await callback.message.edit_text(
+        f"🚫 **لیست کاربران مسدود شده** (صفحه {page} از {total_pages} | مجموع: {total_count} کاربر):\n\n"
+        f"جهت **رفع مسدودیت (Unlock)** هر کاربر، روی دکمه مربوط به آن کلیک نمایید:",
+        reply_markup=markup,
+        parse_mode="Markdown",
+    )
+
+
+@router.message(Command("history"))
+async def cmd_history(message: Message, order_service: OrderService):
+    """Displays paginated order history from newest to oldest with full information."""
+    total_count = await order_service.count_orders()
+    if total_count == 0:
+        await message.answer(
+            "ℹ️ تاکنون هیچ سفارشی در سیستم ثبت نشده است.",
+            parse_mode="Markdown",
+        )
+        return
+
+    page = 1
+    total_pages = max(1, math.ceil(total_count / 10))
+    orders = await order_service.get_orders_paginated(offset=0, limit=10)
+    text = format_orders_history_message(orders, page=page, total_pages=total_pages, total_count=total_count)
+    markup = get_history_pagination_keyboard(page=page, total_pages=total_pages)
+    await message.answer(text, reply_markup=markup, parse_mode="Markdown")
+
+
+@router.callback_query(F.data.startswith("history_page:"))
+async def cb_history_page(callback: CallbackQuery, order_service: OrderService):
+    """Handles pagination for order history."""
+    page = int(callback.data.split(":")[1])
+    total_count = await order_service.count_orders()
+    if total_count == 0:
+        await callback.message.edit_text("ℹ️ تاکنون هیچ سفارشی در سیستم ثبت نشده است.", parse_mode="Markdown")
+        await callback.answer()
+        return
+
+    total_pages = max(1, math.ceil(total_count / 10))
+    if page < 1:
+        page = 1
+    elif page > total_pages:
+        page = total_pages
+
+    orders = await order_service.get_orders_paginated(offset=(page - 1) * 10, limit=10)
+    text = format_orders_history_message(orders, page=page, total_pages=total_pages, total_count=total_count)
+    markup = get_history_pagination_keyboard(page=page, total_pages=total_pages)
+    await callback.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+    await callback.answer()
+
+
+@router.callback_query(F.data == "close_admin_panel")
+async def cb_close_admin_panel(callback: CallbackQuery):
+    """Closes and removes the current admin panel message."""
+    try:
+        await callback.message.delete()
+    except Exception:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.answer("بسته شد.")
+
+
+@router.callback_query(F.data == "noop")
+async def cb_noop(callback: CallbackQuery):
+    """No-op callback for page indicator button."""
+    await callback.answer()
+

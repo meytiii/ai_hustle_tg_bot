@@ -1,7 +1,8 @@
 """Inline keyboards for the Owner review interface (100% Persian / Farsi)."""
 
-from typing import Dict
+from typing import Dict, List
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from src.database.models import BlockedUser
 
 # English explanations delivered to the buyer when a preset rejection reason is chosen by the owner
 REJECTION_PRESET_EXPLANATIONS_EN: Dict[str, str] = {
@@ -101,3 +102,108 @@ def get_owner_cancel_reply_keyboard() -> InlineKeyboardMarkup:
             ]
         ]
     )
+
+
+def get_blocklist_keyboard(
+    blocked_users: List[BlockedUser],
+    page: int,
+    total_pages: int,
+) -> InlineKeyboardMarkup:
+    """Renders the inline buttons for blocked users and page controls."""
+    inline_keyboard: List[List[InlineKeyboardButton]] = []
+
+    # Individual button for each user to unblock
+    for user in blocked_users:
+        if user.username:
+            label = f"🔓 @{user.username} ({user.user_id})"
+        else:
+            label = f"🔓 کاربر {user.user_id}"
+        inline_keyboard.append(
+            [
+                InlineKeyboardButton(
+                    text=label,
+                    callback_data=f"unblock_user:{user.user_id}:{page}",
+                )
+            ]
+        )
+
+    # Navigation row if more than 1 page
+    if total_pages > 1:
+        nav_row: List[InlineKeyboardButton] = []
+        if page > 1:
+            nav_row.append(
+                InlineKeyboardButton(
+                    text="⬅️ قبلی",
+                    callback_data=f"blocklist_page:{page - 1}",
+                )
+            )
+        nav_row.append(
+            InlineKeyboardButton(
+                text=f"📄 {page} / {total_pages}",
+                callback_data="noop",
+            )
+        )
+        if page < total_pages:
+            nav_row.append(
+                InlineKeyboardButton(
+                    text="بعدی ➡️",
+                    callback_data=f"blocklist_page:{page + 1}",
+                )
+            )
+        inline_keyboard.append(nav_row)
+
+    # Close button
+    inline_keyboard.append(
+        [
+            InlineKeyboardButton(
+                text="🔙 بستن لیست",
+                callback_data="close_admin_panel",
+            )
+        ]
+    )
+
+    return InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
+
+
+def get_history_pagination_keyboard(
+    page: int,
+    total_pages: int,
+) -> InlineKeyboardMarkup:
+    """Pagination navigation buttons for order history."""
+    inline_keyboard: List[List[InlineKeyboardButton]] = []
+
+    if total_pages > 1:
+        nav_row: List[InlineKeyboardButton] = []
+        if page > 1:
+            nav_row.append(
+                InlineKeyboardButton(
+                    text="⬅️ قبلی",
+                    callback_data=f"history_page:{page - 1}",
+                )
+            )
+        nav_row.append(
+            InlineKeyboardButton(
+                text=f"📄 {page} / {total_pages}",
+                callback_data="noop",
+            )
+        )
+        if page < total_pages:
+            nav_row.append(
+                InlineKeyboardButton(
+                    text="بعدی ➡️",
+                    callback_data=f"history_page:{page + 1}",
+                )
+            )
+        inline_keyboard.append(nav_row)
+
+    inline_keyboard.append(
+        [
+            InlineKeyboardButton(
+                text="🔙 بستن تاریخچه",
+                callback_data="close_admin_panel",
+            )
+        ]
+    )
+
+    return InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
+

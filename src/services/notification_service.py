@@ -257,3 +257,29 @@ class NotificationService:
         except TelegramAPIError as e:
             logger.error(f"Failed to deliver support reply to user {user_id}: {e}")
             return False
+
+    async def notify_user_unblocked(
+        self,
+        bot: Bot,
+        user_id: int,
+    ) -> bool:
+        """Notifies a reinstated user in polite, professional English that their suspension has been lifted."""
+        text = (
+            f"🛡️ **Account Reinstated**\n\n"
+            f"Hello,\n"
+            f"Following a comprehensive review of your account and message history by our administration team, "
+            f"your account suspension has been officially lifted.\n\n"
+            f"Full access to our bot services, product orders, and customer support has been restored. "
+            f"If you need any assistance or wish to explore available options, please send /start."
+        )
+        try:
+            await bot.send_message(
+                chat_id=user_id,
+                text=text,
+                parse_mode="Markdown",
+            )
+            return True
+        except TelegramAPIError as e:
+            logger.error(f"Failed to deliver account reinstatement notification to user {user_id}: {e}")
+            return False
+

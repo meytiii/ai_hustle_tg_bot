@@ -3,7 +3,7 @@
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.database.models import BlockedUser, Order, OrderStatus, utc_now
@@ -246,16 +246,43 @@ class OrderService:
         logger.info(f"Order {order_number} CANCELLED by user.")
         return order
 
-    async def block_user(self, user_id: int, reason: Optional[str] = None) -> BlockedUser:
-        """Blocks a user from performing actions in the bot."""
+    async def block_user(
+        self,
+        user_id: int,
+        username: Optional[str] = None,
+        reason: Optional[str] = None,
+    ) -> BlockedUser:
+        """Blocks a user from performing actions in the bot, persisting username if available."""
+        if not username:
+            # Try to resolve username from previous orders
+            order_stmt = (
+                select(Order.username)
+                .where(Order.user_id == user_id, Order.username.isnot(None))
+                .order_by(Order.created_at.desc())
+                .limit(1)
+            )
+            order_res = await self.session.execute(order_stmt)
+            username = order_res.scalar_one_or_none()
+
         stmt = select(BlockedUser).where(BlockedUser.user_id == user_id)
         result = await self.session.execute(stmt)
         record = result.scalars().first()
         if not record:
-            record = BlockedUser(user_id=user_id, reason=reason, blocked_at=utc_now())
+            record = BlockedUser(
+                user_id=user_id,
+                username=username,
+                reason=reason,
+                blocked_at=utc_now(),
+            )
             self.session.add(record)
             await self.session.flush()
-            logger.info(f"User {user_id} added to blocked_users.")
+            logger.info(f"User {user_id} (@{username}) added to blocked_users.")
+        else:
+            if username and not record.username:
+                record.username = username
+            if reason:
+                record.reason = reason
+            await self.session.flush()
         return record
 
     async def unblock_user(self, user_id: int) -> bool:
@@ -275,3 +302,37 @@ class OrderService:
         stmt = select(BlockedUser).where(BlockedUser.user_id == user_id)
         result = await self.session.execute(stmt)
         return result.scalars().first() is not None
+
+    async def get_blocked_users(self, offset: int = 0, limit: int = 10) -> list[BlockedUser]:
+        """Returns a paginated list of blocked users ordered newest to oldest."""
+        stmt = (
+            select(BlockedUser)
+            .order_by(BlockedUser.blocked_at.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def count_blocked_users(self) -> int:
+        """Returns total number of blocked users."""
+        stmt = select(func.count(BlockedUser.user_id))
+        result = await self.session.execute(stmt)
+        return result.scalar_one()
+
+    async def get_orders_paginated(self, offset: int = 0, limit: int = 10) -> list[Order]:
+        """Returns a paginated list of orders ordered newest to oldest."""
+        stmt = (
+            select(Order)
+            .order_by(Order.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def count_orders(self) -> int:
+        """Returns total count of registered orders."""
+        stmt = select(func.count(Order.id))
+        result = await self.session.execute(stmt)
+        return result.scalar_one()

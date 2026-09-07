@@ -71,27 +71,33 @@ async def cmd_cancel(message: Message, state: FSMContext, order_service: OrderSe
     )
 
 
-@router.callback_query(F.data == "buy_now")
-async def cb_buy_now(
-    callback: CallbackQuery,
+async def execute_buy_flow(
+    event: Message | CallbackQuery,
     state: FSMContext,
     order_service: OrderService,
     settings: Settings,
 ):
-    """Creates a new order and presents payment instructions and the pre-payment advisory."""
+    """Core logic to create or resume an order and display payment instructions."""
     await state.clear()
-    user = callback.from_user
+    user = event.from_user
 
     # Check if user already has an active order under review
     active_order = await order_service.get_active_order_by_user(user.id)
     if active_order:
         if active_order.status == OrderStatus.UNDER_REVIEW.value:
-            await callback.answer()
-            await callback.message.answer(
-                f"ℹ️ Your order `#{active_order.order_number}` is currently under review by our administrator.\n\n"
-                f"You will receive your PDF guide as soon as verification is complete.",
-                parse_mode="Markdown",
-            )
+            if isinstance(event, CallbackQuery):
+                await event.answer()
+                await event.message.answer(
+                    f"ℹ️ Your order `#{active_order.order_number}` is currently under review by our administrator.\n\n"
+                    f"You will receive your PDF guide as soon as verification is complete.",
+                    parse_mode="Markdown",
+                )
+            else:
+                await event.answer(
+                    f"ℹ️ Your order `#{active_order.order_number}` is currently under review by our administrator.\n\n"
+                    f"You will receive your PDF guide as soon as verification is complete.",
+                    parse_mode="Markdown",
+                )
             return
         elif active_order.status in [OrderStatus.AWAITING_PAYMENT.value, OrderStatus.AWAITING_RECEIPT.value]:
             # Reuse existing active pending order
@@ -130,12 +136,62 @@ async def cb_buy_now(
         f"⏱️ _This order remains valid for {settings.order_timeout_minutes} minutes._"
     )
 
-    await callback.answer()
-    await callback.message.answer(
-        text=payment_instructions,
-        parse_mode="Markdown",
-        reply_markup=get_order_payment_keyboard(order.order_number),
+    markup = get_order_payment_keyboard(order.order_number)
+    if isinstance(event, CallbackQuery):
+        await event.answer()
+        await event.message.answer(
+            text=payment_instructions,
+            parse_mode="Markdown",
+            reply_markup=markup,
+        )
+    else:
+        await event.answer(
+            text=payment_instructions,
+            parse_mode="Markdown",
+            reply_markup=markup,
+        )
+
+
+@router.message(Command("buy"))
+async def cmd_buy(
+    message: Message,
+    state: FSMContext,
+    order_service: OrderService,
+    settings: Settings,
+):
+    """Executes the buying procedure via /buy."""
+    await execute_buy_flow(message, state, order_service, settings)
+
+
+@router.callback_query(F.data == "buy_now")
+async def cb_buy_now(
+    callback: CallbackQuery,
+    state: FSMContext,
+    order_service: OrderService,
+    settings: Settings,
+):
+    """Creates a new order and presents payment instructions via the inline button."""
+    await execute_buy_flow(callback, state, order_service, settings)
+
+
+@router.message(Command("info"))
+async def cmd_info(message: Message, settings: Settings):
+    """Provides product information and current launch pricing."""
+    info_text = (
+        f"📖 **About 'AI Side Hustle' (PDF Guide)**\n\n"
+        f"A comprehensive, actionable blueprint designed to help you build sustainable online income "
+        f"streams leveraging modern artificial intelligence tools.\n\n"
+        f"• **Format:** Digital PDF eBook\n"
+        f"• **Price:** **${settings.price_usd:g}** ~~(Regular: ${settings.original_price_usd:g})~~\n"
+        f"• **Delivery:** Instant automated file delivery directly in Telegram once your payment is verified.\n\n"
+        f"Ready to unlock your copy? Use **/buy** or tap below:"
     )
+    await message.answer(
+        text=info_text,
+        parse_mode="Markdown",
+        reply_markup=get_start_keyboard(),
+    )
+
 
 
 @router.callback_query(F.data.startswith("submit_proof:"))

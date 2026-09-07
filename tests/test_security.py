@@ -1,5 +1,6 @@
 """Security and authorization tests."""
 
+from unittest.mock import AsyncMock, MagicMock
 import pytest
 from aiogram.types import CallbackQuery, Message, User
 from src.bot.middlewares.auth_middleware import OwnerAuthMiddleware
@@ -166,4 +167,41 @@ async def test_blocked_user_middleware(order_service: OrderService):
 
     assert result == "HandlerExecuted"
     assert called is True
+
+
+@pytest.mark.asyncio
+async def test_owner_auth_middleware_allows_both_owner_and_dev():
+    """Verifies that OwnerAuthMiddleware accepts multiple admin IDs (Owner + Developer)."""
+    owner_id = 72101760
+    dev_id = 347382968
+    middleware = OwnerAuthMiddleware({owner_id, dev_id})
+
+    called = False
+
+    async def mock_handler(event, data):
+        nonlocal called
+        called = True
+        return "Allowed"
+
+    mock_msg = MagicMock(spec=Message)
+
+    # 1. Owner user
+    called = False
+    res1 = await middleware(mock_handler, mock_msg, {"event_from_user": User(id=owner_id, is_bot=False, first_name="Owner")})
+    assert res1 == "Allowed"
+    assert called is True
+
+    # 2. Developer user
+    called = False
+    res2 = await middleware(mock_handler, mock_msg, {"event_from_user": User(id=dev_id, is_bot=False, first_name="Dev")})
+    assert res2 == "Allowed"
+    assert called is True
+
+    # 3. Unauthorized user
+    called = False
+    mock_msg.answer = AsyncMock()
+    res3 = await middleware(mock_handler, mock_msg, {"event_from_user": User(id=99999, is_bot=False, first_name="Other")})
+    assert res3 is None
+    assert called is False
+
 

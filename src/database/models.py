@@ -85,6 +85,7 @@ class BlockedUser(Base):
     __tablename__ = "blocked_users"
 
     user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    username: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     reason: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
     blocked_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, nullable=False

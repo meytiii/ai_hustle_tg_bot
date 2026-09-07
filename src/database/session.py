@@ -69,6 +69,15 @@ async def init_db(database_url: str) -> None:
     engine = get_engine(database_url)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        if "sqlite" in database_url:
+            def migrate_sqlite(sync_conn):
+                cursor = sync_conn.connection.cursor()
+                cursor.execute("PRAGMA table_info(blocked_users);")
+                cols = [row[1] for row in cursor.fetchall()]
+                if cols and "username" not in cols:
+                    cursor.execute("ALTER TABLE blocked_users ADD COLUMN username VARCHAR(64);")
+                cursor.close()
+            await conn.run_sync(migrate_sqlite)
     logger.info("Database initialized successfully with WAL mode enabled.")
 
 

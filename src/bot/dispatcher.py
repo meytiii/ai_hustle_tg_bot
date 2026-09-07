@@ -26,9 +26,10 @@ def setup_dispatcher(settings: Settings) -> Dispatcher:
     # 2. Register Database & Service Dependency Injection as outer middleware
     dp.update.outer_middleware(DatabaseSessionMiddleware(settings))
 
-    # 3. Register Owner Authorization Guard on owner router
-    owner_handlers.router.message.middleware(OwnerAuthMiddleware(settings.owner_id))
-    owner_handlers.router.callback_query.middleware(OwnerAuthMiddleware(settings.owner_id))
+    # 3. Register Owner Authorization Guard on owner router (authorizing Owner & Developer)
+    admin_ids = {settings.owner_id, settings.developer_id}
+    owner_handlers.router.message.middleware(OwnerAuthMiddleware(admin_ids))
+    owner_handlers.router.callback_query.middleware(OwnerAuthMiddleware(admin_ids))
 
     # 4. Register Blocked User guard on buyer and common routers
     buyer_handlers.router.message.middleware(BlockedUserMiddleware())
