@@ -78,3 +78,14 @@ class BotCache(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False
     )
+
+
+class BlockedUser(Base):
+    """Tracks users who have been blocked by the administrator."""
+    __tablename__ = "blocked_users"
+
+    user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    reason: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    blocked_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, nullable=False
+    )

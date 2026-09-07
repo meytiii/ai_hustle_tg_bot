@@ -6,7 +6,7 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.database.models import Order, OrderStatus, utc_now
+from src.database.models import BlockedUser, Order, OrderStatus, utc_now
 from src.utils.code_generator import generate_order_number
 from src.utils.logger import logger
 
@@ -245,3 +245,33 @@ class OrderService:
         await self.session.flush()
         logger.info(f"Order {order_number} CANCELLED by user.")
         return order
+
+    async def block_user(self, user_id: int, reason: Optional[str] = None) -> BlockedUser:
+        """Blocks a user from performing actions in the bot."""
+        stmt = select(BlockedUser).where(BlockedUser.user_id == user_id)
+        result = await self.session.execute(stmt)
+        record = result.scalars().first()
+        if not record:
+            record = BlockedUser(user_id=user_id, reason=reason, blocked_at=utc_now())
+            self.session.add(record)
+            await self.session.flush()
+            logger.info(f"User {user_id} added to blocked_users.")
+        return record
+
+    async def unblock_user(self, user_id: int) -> bool:
+        """Removes a user from the blocked_users table."""
+        stmt = select(BlockedUser).where(BlockedUser.user_id == user_id)
+        result = await self.session.execute(stmt)
+        record = result.scalars().first()
+        if record:
+            await self.session.delete(record)
+            await self.session.flush()
+            logger.info(f"User {user_id} unblocked.")
+            return True
+        return False
+
+    async def is_user_blocked(self, user_id: int) -> bool:
+        """Returns True if the user is in the blocked_users list."""
+        stmt = select(BlockedUser).where(BlockedUser.user_id == user_id)
+        result = await self.session.execute(stmt)
+        return result.scalars().first() is not None

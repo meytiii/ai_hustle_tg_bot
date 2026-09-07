@@ -179,3 +179,32 @@ async def test_expired_order_handling(order_service: OrderService):
 
     with pytest.raises(OrderExpiredError):
         await order_service.submit_tx_hash(order.order_number, "expired_tx")
+
+
+@pytest.mark.asyncio
+async def test_block_and_unblock_user(order_service: OrderService):
+    """Verifies that an admin can block and unblock users via OrderService."""
+    test_user_id = 99887766
+
+    # Initially not blocked
+    assert await order_service.is_user_blocked(test_user_id) is False
+
+    # Block user
+    blocked_record = await order_service.block_user(test_user_id, reason="Spamming support")
+    assert blocked_record.user_id == test_user_id
+    assert blocked_record.reason == "Spamming support"
+    assert await order_service.is_user_blocked(test_user_id) is True
+
+    # Blocking again is idempotent
+    second_block = await order_service.block_user(test_user_id)
+    assert second_block.user_id == test_user_id
+    assert await order_service.is_user_blocked(test_user_id) is True
+
+    # Unblock user
+    unblocked = await order_service.unblock_user(test_user_id)
+    assert unblocked is True
+    assert await order_service.is_user_blocked(test_user_id) is False
+
+    # Unblocking again returns False
+    assert await order_service.unblock_user(test_user_id) is False
+

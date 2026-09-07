@@ -7,6 +7,7 @@ from aiogram.types import ErrorEvent
 
 from src.bot.handlers import buyer_handlers, common_handlers, owner_handlers
 from src.bot.middlewares.auth_middleware import OwnerAuthMiddleware
+from src.bot.middlewares.blocked_user_middleware import BlockedUserMiddleware
 from src.bot.middlewares.db_middleware import DatabaseSessionMiddleware
 from src.bot.middlewares.reaction_middleware import ReactionMiddleware
 from src.config import Settings
@@ -25,11 +26,16 @@ def setup_dispatcher(settings: Settings) -> Dispatcher:
     # 2. Register Database & Service Dependency Injection as outer middleware
     dp.update.outer_middleware(DatabaseSessionMiddleware(settings))
 
-    # 2. Register Owner Authorization Guard on owner router
+    # 3. Register Owner Authorization Guard on owner router
     owner_handlers.router.message.middleware(OwnerAuthMiddleware(settings.owner_id))
     owner_handlers.router.callback_query.middleware(OwnerAuthMiddleware(settings.owner_id))
 
-    # 3. Register Routers (order matters: specific handlers before common fallback)
+    # 4. Register Blocked User guard on buyer and common routers
+    buyer_handlers.router.message.middleware(BlockedUserMiddleware())
+    buyer_handlers.router.callback_query.middleware(BlockedUserMiddleware())
+    common_handlers.router.message.middleware(BlockedUserMiddleware())
+
+    # 5. Register Routers (order matters: specific handlers before common fallback)
     dp.include_router(buyer_handlers.router)
     dp.include_router(owner_handlers.router)
     dp.include_router(common_handlers.router)

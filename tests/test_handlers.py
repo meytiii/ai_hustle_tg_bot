@@ -267,3 +267,35 @@ async def test_support_message_and_reply_flow(test_settings, fsm_storage):
     buyer_msg_text = buyer_delivery[-1].kwargs.get("text", "")
     assert "Support Team Response" in buyer_msg_text
     assert "Verification usually takes between 5 to 15 minutes." in buyer_msg_text
+
+
+@pytest.mark.asyncio
+async def test_owner_block_user_callback(order_service: OrderService):
+    """Tests the owner blocking a user directly via the inline button on a support message."""
+    from src.bot.handlers.owner_handlers import cb_block_user
+
+    target_user_id = 88888
+    assert await order_service.is_user_blocked(target_user_id) is False
+
+    cb = MagicMock(spec=CallbackQuery)
+    cb.data = f"block_user:{target_user_id}"
+    cb.message = MagicMock()
+    cb.message.answer = AsyncMock()
+    cb.message.edit_reply_markup = AsyncMock()
+    cb.answer = AsyncMock()
+
+    await cb_block_user(cb, order_service)
+
+    # User must now be blocked in DB
+    assert await order_service.is_user_blocked(target_user_id) is True
+
+    # Alert shown to admin
+    cb.answer.assert_called_once_with("کاربر با موفقیت مسدود شد.", show_alert=True)
+    cb.message.edit_reply_markup.assert_called_once_with(reply_markup=None)
+
+    # Confirmation sent to admin chat
+    assert cb.message.answer.called
+    admin_msg = cb.message.answer.call_args[0][0]
+    assert str(target_user_id) in admin_msg
+    assert "مسدود شد" in admin_msg
+

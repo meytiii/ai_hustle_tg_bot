@@ -287,3 +287,18 @@ async def process_owner_support_reply(
             f"⚠️ **ارسال پاسخ ناموفق بود!** ممکن است کاربر ربات را مسدود (بلاک) کرده باشد.",
             parse_mode="Markdown",
         )
+
+
+@router.callback_query(F.data.startswith("block_user:"))
+async def cb_block_user(callback: CallbackQuery, order_service: OrderService):
+    """Blocks a user and confirms to the owner."""
+    user_id = int(callback.data.split(":")[1])
+    await order_service.block_user(user_id)
+
+    await callback.answer("کاربر با موفقیت مسدود شد.", show_alert=True)
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.message.answer(
+        f"🚫 **کاربر با شناسه `{user_id}` مسدود شد.**\n\n"
+        f"این کاربر دیگر قادر به ارسال پیام به پشتیبانی یا خرید از ربات نخواهد بود.",
+        parse_mode="Markdown",
+    )

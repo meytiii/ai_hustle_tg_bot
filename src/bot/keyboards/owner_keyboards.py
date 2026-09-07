@@ -70,7 +70,7 @@ def get_owner_reject_presets_keyboard(order_number: str) -> InlineKeyboardMarkup
 
 
 def get_owner_support_reply_keyboard(user_id: int) -> InlineKeyboardMarkup:
-    """Action button on user support messages allowing the owner to reply."""
+    """Action buttons on user support messages allowing the owner to reply or block."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -78,7 +78,13 @@ def get_owner_support_reply_keyboard(user_id: int) -> InlineKeyboardMarkup:
                     text="✍️ پاسخ به این پیام",
                     callback_data=f"support_reply:{user_id}",
                 )
-            ]
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🚫 مسدود کردن این کاربر",
+                    callback_data=f"block_user:{user_id}",
+                )
+            ],
         ]
     )
 

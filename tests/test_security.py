@@ -109,3 +109,61 @@ async def test_reaction_middleware_salute():
 
     result = await middleware(mock_handler, failing_msg, {})
     assert result == "HandlerExecuted"
+
+
+@pytest.mark.asyncio
+async def test_blocked_user_middleware(order_service: OrderService):
+    """Verifies that BlockedUserMiddleware blocks blocked users and permits unblocked users."""
+    from unittest.mock import AsyncMock, MagicMock
+    from src.bot.middlewares.blocked_user_middleware import BlockedUserMiddleware
+
+    middleware = BlockedUserMiddleware()
+    called = False
+
+    async def mock_handler(event, data):
+        nonlocal called
+        called = True
+        return "HandlerExecuted"
+
+    blocked_user_id = 777111
+    allowed_user_id = 888222
+
+    # Block one user
+    await order_service.block_user(blocked_user_id, reason="Abusive behavior")
+
+    # 1. Blocked user sends Message
+    blocked_user = User(id=blocked_user_id, is_bot=False, first_name="Blocked")
+    msg_blocked = MagicMock(spec=Message)
+    msg_blocked.answer = AsyncMock()
+
+    called = False
+    data_blocked = {"event_from_user": blocked_user, "order_service": order_service}
+    result = await middleware(mock_handler, msg_blocked, data_blocked)
+
+    assert result is None
+    assert called is False
+    msg_blocked.answer.assert_called_once_with("⚠️ Your account has been suspended.")
+
+    # 2. Blocked user sends CallbackQuery
+    cb_blocked = MagicMock(spec=CallbackQuery)
+    cb_blocked.answer = AsyncMock()
+
+    called = False
+    result = await middleware(mock_handler, cb_blocked, data_blocked)
+
+    assert result is None
+    assert called is False
+    cb_blocked.answer.assert_called_once_with("⚠️ Your account has been suspended.", show_alert=True)
+
+    # 3. Unblocked user sends Message
+    allowed_user = User(id=allowed_user_id, is_bot=False, first_name="Allowed")
+    msg_allowed = MagicMock(spec=Message)
+    msg_allowed.answer = AsyncMock()
+
+    called = False
+    data_allowed = {"event_from_user": allowed_user, "order_service": order_service}
+    result = await middleware(mock_handler, msg_allowed, data_allowed)
+
+    assert result == "HandlerExecuted"
+    assert called is True
+
