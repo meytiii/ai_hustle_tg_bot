@@ -92,18 +92,15 @@ async def test_notification_service_bilingual_dispatch():
         expires_at=utc_now(),
     )
 
-    # 1. Owner notification (must be in Persian, escaped username, Shamsi date, $79 price)
+    # 1. Owner notification (must be in Persian, escaped username, $79 price)
     await notifier.notify_owner_new_order(mock_bot, order, reply_markup=None)
     owner_msg = sent_messages[-1]
     assert owner_msg["chat_id"] == owner_id
-    assert "سفارش جدید جهت بررسی" in owner_msg["caption"]
+    assert "بررسی پرداخت جدید" in owner_msg["caption"]
     assert "هش تراکنش" in owner_msg["caption"]
     assert r"@mehdi\_kh\_278" in owner_msg["caption"]
     assert "$79" in owner_msg["caption"]
-    assert "مبلغ سفارش" in owner_msg["caption"]
-    assert "وضعیت:** در انتظار تایید" in owner_msg["caption"]
-    assert "در انتظار تایید مالک" not in owner_msg["caption"]
-    assert "TON" not in owner_msg["caption"].split("مبلغ سفارش")[1].split("\n")[0]
+    assert "مبلغ" in owner_msg["caption"]
 
     # 2. Developer completion report (must be in English, Shamsi date, $79 price without TON)
     await notifier.notify_developer_completed(mock_bot, order)
@@ -115,14 +112,24 @@ async def test_notification_service_bilingual_dispatch():
     assert "• **Amount:** $79" in dev_msg["text"]
     assert "(Tehran)" in dev_msg["text"]
 
-    # 3. Buyer rejection notice (must be in English)
+    # 3. Buyer rejection notice (must be in English matching Step 11)
     await notifier.notify_buyer_rejected(
         mock_bot,
         user_id=order.user_id,
         order_number=order.order_number,
-        reason="Transaction not found on blockchain.",
     )
     buyer_msg = sent_messages[-1]
     assert buyer_msg["chat_id"] == order.user_id
-    assert "Your order #ASH-TEST1 could not be approved" in buyer_msg["text"]
-    assert "Transaction not found on blockchain." in buyer_msg["text"]
+    assert "Payment Could Not Be Confirmed" in buyer_msg["text"]
+    assert "contact support" in buyer_msg["text"]
+
+    # 4. Buyer approval notice (must be in English matching Step 9)
+    await notifier.notify_buyer_approved(
+        mock_bot,
+        user_id=order.user_id,
+        order_number=order.order_number,
+    )
+    buyer_approved_msg = sent_messages[-1]
+    assert buyer_approved_msg["chat_id"] == order.user_id
+    assert "Payment Confirmed!" in buyer_approved_msg["text"]
+    assert "Download your product below:" in buyer_approved_msg["text"]

@@ -13,19 +13,19 @@ REJECTION_PRESET_EXPLANATIONS_EN: Dict[str, str] = {
 
 
 def get_owner_review_keyboard(order_number: str) -> InlineKeyboardMarkup:
-    """Action buttons attached to incoming order review notifications."""
+    """Action buttons attached to incoming order review notifications in Persian."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="✅ تایید و ارسال فایل به خریدار",
+                    text="✅ تایید پرداخت",
                     callback_data=f"owner_approve:{order_number}",
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="❌ رد سفارش",
-                    callback_data=f"owner_reject_menu:{order_number}",
+                    text="❌ رد پرداخت",
+                    callback_data=f"owner_reject:{order_number}",
                 )
             ],
         ]

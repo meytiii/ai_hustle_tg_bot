@@ -45,7 +45,7 @@ class Order(Base):
     wallet_address: Mapped[str] = mapped_column(String(128), nullable=False)
 
     # Submitted payment proof
-    tx_hash: Mapped[Optional[str]] = mapped_column(String(128), unique=True, index=True, nullable=True)
+    tx_hash: Mapped[Optional[str]] = mapped_column(String(128), index=True, nullable=True)
     receipt_file_id: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
 
     status: Mapped[str] = mapped_column(

@@ -50,26 +50,22 @@ class NotificationService:
         order: Order,
         reply_markup: InlineKeyboardMarkup,
     ) -> Optional[int]:
-        """Sends new order submission card in Persian (FA) to the Owner with the attached receipt screenshot."""
+        """Sends new order submission card in Persian to the Owner."""
         buyer_handle = f"@{escape_md(order.username)}" if order.username else "ندارد"
         buyer_name = escape_md(order.full_name)
-        shamsi_date = format_shamsi_datetime(order.created_at)
 
         caption = (
-            f"🔔 **سفارش جدید جهت بررسی و تایید**\n\n"
-            f"🏷️ **شماره سفارش:** `{order.order_number}`\n"
-            f"👤 **خریدار:** {buyer_name} ({buyer_handle})\n"
-            f"🆔 **شناسه تلگرام خریدار:** `{order.user_id}`\n\n"
-            f"💰 **مبلغ سفارش:** ${order.amount_usd:g}\n"
+            f"🔔 **بررسی پرداخت جدید**\n\n"
+            f"📦 **محصول:** AI Side Hustle Launch System\n"
+            f"💰 **مبلغ:** ${order.amount_usd:g} (79 USDT)\n"
+            f"👤 **خریدار:** {buyer_handle} ({buyer_name})\n"
+            f"🆔 **شناسه تلگرام:** `{order.user_id}`\n"
             f"🔗 **هش تراکنش:**\n`{order.tx_hash}`\n\n"
-            f"📅 **تاریخ ثبت:** {shamsi_date}\n"
-            f"📌 **وضعیت:** در انتظار تایید\n\n"
-            f"لطفاً ولت خود را بررسی نموده و تصمیم خود را ثبت نمایید:"
+            f"لطفاً تراکنش را در شبکه TON بررسی نمایید:"
         )
 
         try:
             if order.receipt_file_id:
-                # Receipt can be sent as photo
                 msg = await bot.send_photo(
                     chat_id=self.owner_id,
                     photo=order.receipt_file_id,
@@ -97,8 +93,8 @@ class NotificationService:
     ) -> None:
         """Sends confirmation in Persian to Owner after successful approval."""
         text = (
-            f"✅ **سفارش `{order.order_number}` با موفقیت تایید شد.**\n\n"
-            f"فایل کتاب **AI Side Hustle** مستقیماً برای خریدار ارسال گردید."
+            f"✅ **پرداخت برای سفارش `{order.order_number}` تایید شد.**\n\n"
+            f"پیام حاوی دکمه دریافت فایل برای خریدار ارسال گردید."
         )
         try:
             await bot.send_message(chat_id=self.owner_id, text=text, parse_mode="Markdown")
@@ -109,13 +105,12 @@ class NotificationService:
         self,
         bot: Bot,
         order: Order,
-        reason: str,
+        reason: str = "",
     ) -> None:
         """Sends rejection confirmation in Persian to Owner."""
         text = (
-            f"❌ **سفارش `{order.order_number}` رد شد.**\n\n"
-            f"علت رد سفارش:\n_{reason}_\n\n"
-            f"پیام متناسب به زبان انگلیسی برای خریدار ارسال گردید."
+            f"❌ **پرداخت برای سفارش `{order.order_number}` رد شد.**\n\n"
+            f"اطلاعیه عدم تایید پرداخت برای خریدار ارسال گردید."
         )
         try:
             await bot.send_message(chat_id=self.owner_id, text=text, parse_mode="Markdown")
@@ -175,20 +170,50 @@ class NotificationService:
         except TelegramAPIError as e:
             logger.error(f"Failed to dispatch error alert to Developer: {e}")
 
+    async def notify_buyer_approved(
+        self,
+        bot: Bot,
+        user_id: int,
+        order_number: str,
+        reply_markup: Optional[InlineKeyboardMarkup] = None,
+    ) -> None:
+        """Sends Step 9 payment confirmation message with download button to Buyer in English."""
+        text = (
+            "🎉 **Payment Confirmed!**\n\n"
+            "Your payment has been successfully verified.\n"
+            "Thank you for your purchase!\n"
+            "Your AI Side Hustle Launch System — Visual Pro Edition is ready.\n"
+            "📥 Download your product below:\n\n"
+            "We hope the system helps you turn your idea into action.\n"
+            "🚀 Good luck with your launch!"
+        )
+        try:
+            await bot.send_message(
+                chat_id=user_id,
+                text=text,
+                parse_mode="Markdown",
+                reply_markup=reply_markup,
+            )
+        except TelegramAPIError as e:
+            logger.warning(f"Failed to deliver approval confirmation to user {user_id}: {e}")
+
     async def notify_buyer_rejected(
         self,
         bot: Bot,
         user_id: int,
         order_number: str,
-        reason: str,
+        reason: Optional[str] = None,
         reply_markup: Optional[InlineKeyboardMarkup] = None,
     ) -> None:
-        """Delivers rejection explanation to Buyer in English."""
+        """Delivers Step 11 rejection message to Buyer in English."""
         text = (
-            f"❌ **Your order #{order_number} could not be approved.**\n\n"
-            f"**Reason provided:**\n{reason}\n\n"
-            f"If you believe this was an error or would like to submit a corrected payment, "
-            f"you may start a new order below."
+            "❌ **Payment Could Not Be Confirmed**\n\n"
+            "We could not confirm your payment yet.\n"
+            "Please check that:\n"
+            "• You sent the correct amount\n"
+            "• You used the TON Network\n"
+            "• You sent the payment to the correct wallet address\n\n"
+            "If you believe you completed the payment correctly, please contact support and send your transaction hash."
         )
         try:
             await bot.send_message(

@@ -123,7 +123,7 @@ class OrderService:
         return result.scalars().first() is not None
 
     async def submit_tx_hash(self, order_number: str, tx_hash: str) -> Order:
-        """Saves the buyer's transaction hash and advances order to AWAITING_RECEIPT."""
+        """Saves the buyer's transaction hash and advances order to UNDER_REVIEW."""
         order = await self.get_order_by_number(order_number)
         if not order:
             raise OrderNotFoundError(f"Order {order_number} not found.")
@@ -137,14 +137,11 @@ class OrderService:
             raise OrderStateError(f"Cannot submit transaction hash for order in state '{order.status}'.")
 
         cleaned_hash = tx_hash.strip()
-        if await self.is_tx_hash_taken(cleaned_hash, order_number):
-            raise DuplicateTxHashError("This transaction hash has already been submitted for another order.")
-
         order.tx_hash = cleaned_hash
-        order.status = OrderStatus.AWAITING_RECEIPT.value
+        order.status = OrderStatus.UNDER_REVIEW.value
         order.updated_at = utc_now()
         await self.session.flush()
-        logger.info(f"TX Hash recorded for order {order_number}.")
+        logger.info(f"TX Hash recorded for order {order_number}. State changed to UNDER_REVIEW.")
         return order
 
     async def submit_receipt(self, order_number: str, receipt_file_id: str) -> Order:
@@ -158,7 +155,7 @@ class OrderService:
             await self.session.flush()
             raise OrderExpiredError(f"Order {order_number} has expired.")
 
-        if order.status != OrderStatus.AWAITING_RECEIPT.value:
+        if order.status not in (OrderStatus.AWAITING_RECEIPT.value, OrderStatus.UNDER_REVIEW.value):
             raise OrderStateError(f"Cannot submit receipt screenshot for order in state '{order.status}'.")
 
         order.receipt_file_id = receipt_file_id

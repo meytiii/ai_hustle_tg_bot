@@ -6,7 +6,11 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
-from src.bot.keyboards.buyer_keyboards import get_retry_keyboard
+from src.bot.keyboards.buyer_keyboards import (
+    get_download_pdf_keyboard,
+    get_rejection_keyboard,
+    get_retry_keyboard,
+)
 from src.bot.keyboards.owner_keyboards import (
     REJECTION_PRESET_EXPLANATIONS_EN,
     get_blocklist_keyboard,
@@ -29,11 +33,10 @@ router = Router(name="owner_router")
 async def cb_owner_approve(
     callback: CallbackQuery,
     order_service: OrderService,
-    delivery_service: DeliveryService,
     notification_service: NotificationService,
     bot: Bot,
 ):
-    """Handles order approval, immediate idempotent file delivery, and bilingual notifications."""
+    """Handles order approval, sends Step 9 confirmation with download button to Buyer, updates Owner."""
     order_number = callback.data.split(":")[1]
     order = await order_service.get_order_by_number(order_number)
 
@@ -41,7 +44,7 @@ async def cb_owner_approve(
         await callback.answer("سفارش یافت نشد.", show_alert=True)
         return
 
-    # Idempotency check: if already approved/delivered, avoid duplicate file dispatch
+    # Idempotency check: if already approved/delivered, avoid duplicate processing
     if order.status in [OrderStatus.APPROVED.value, OrderStatus.DELIVERED.value]:
         await callback.answer("این سفارش قبلاً تایید شده است.", show_alert=True)
         return
@@ -50,7 +53,7 @@ async def cb_owner_approve(
         await callback.answer(f"وضعیت سفارش نامعتبر است: {order.status}", show_alert=True)
         return
 
-    await callback.answer("در حال ثبت تایید و ارسال فایل...")
+    await callback.answer("در حال ثبت تایید پرداخت...")
 
     # 1. Transition state to APPROVED
     try:
@@ -59,43 +62,71 @@ async def cb_owner_approve(
         await callback.message.answer(f"خطا در تغییر وضعیت سفارش: {e}")
         return
 
-    # 2. Deliver PDF to Buyer
-    try:
-        await delivery_service.deliver_pdf(bot, order.user_id, order.order_number)
-        await order_service.mark_delivered(order_number)
+    # 2. Update Owner UI (Persian)
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.message.answer(
+        f"✅ **پرداخت برای سفارش `#{order.order_number}` تایید شد.**\n\n"
+        f"پیام حاوی دکمه دریافت فایل کتاب به تلگرام خریدار ارسال گردید.",
+        parse_mode="Markdown",
+    )
 
-        # Update Owner UI
-        await callback.message.edit_reply_markup(reply_markup=None)
-        await callback.message.answer(
-            f"✅ **سفارش `#{order.order_number}` تایید شد.**\n\n"
-            f"فایل کتاب با موفقیت به تلگرام خریدار ارسال گردید.",
-            parse_mode="Markdown",
-        )
+    # 3. Deliver Step 9 confirmation message with download button to Buyer in English
+    download_markup = get_download_pdf_keyboard(order.order_number)
+    await notification_service.notify_buyer_approved(
+        bot=bot,
+        user_id=order.user_id,
+        order_number=order.order_number,
+        reply_markup=download_markup,
+    )
 
-        # Notify Developer (English)
-        await notification_service.notify_developer_completed(bot, order)
+    # 4. Notify Developer (English)
+    await notification_service.notify_developer_completed(bot, order)
 
-    except BuyerBlockedBotError:
-        await order_service.mark_delivery_failed(order_number)
-        await callback.message.edit_reply_markup(reply_markup=None)
-        await callback.message.answer(
-            f"⚠️ **سفارش `#{order.order_number}` تایید شد، اما ارسال فایل ناموفق بود!**\n\n"
-            f"علت: خریدار ربات را مسدود (بلاک) کرده است.",
-            parse_mode="Markdown",
-        )
-        await notification_service.notify_developer_error(
-            bot,
-            context=f"Delivery failed for order {order_number}",
-            error_details="Buyer has blocked the bot.",
-        )
-    except DeliveryError as e:
-        await order_service.mark_delivery_failed(order_number)
-        await callback.message.answer(f"❌ خطا در ارسال فایل: {e}")
-        await notification_service.notify_developer_error(
-            bot,
-            context=f"Delivery failed for order {order_number}",
-            error_details=str(e),
-        )
+
+@router.callback_query(F.data.startswith("owner_reject:"))
+async def cb_owner_reject(
+    callback: CallbackQuery,
+    order_service: OrderService,
+    notification_service: NotificationService,
+    bot: Bot,
+):
+    """Handles direct one-click rejection in Persian interface, notifies buyer with Step 11 in English."""
+    order_number = callback.data.split(":")[1]
+    order = await order_service.get_order_by_number(order_number)
+
+    if not order:
+        await callback.answer("سفارش یافت نشد.", show_alert=True)
+        return
+
+    if order.status != OrderStatus.UNDER_REVIEW.value:
+        await callback.answer("این سفارش در وضعیت بررسی قرار ندارد.", show_alert=True)
+        return
+
+    reason = "Payment could not be confirmed on TON network."
+    order = await order_service.reject_order(order_number, reason)
+
+    # Remove buttons from original card
+    await callback.message.edit_reply_markup(reply_markup=None)
+
+    # Confirm to Owner in Persian
+    await callback.message.answer(
+        f"❌ **پرداخت برای سفارش `#{order.order_number}` رد شد.**\n\n"
+        f"اطلاعیه عدم تایید همراه با دکمه‌های پشتیبانی و تلاش مجدد برای خریدار ارسال گردید.",
+        parse_mode="Markdown",
+    )
+
+    # Notify Buyer in English (Step 11 with Contact Support & Try Again)
+    rejection_markup = get_rejection_keyboard()
+    await notification_service.notify_buyer_rejected(
+        bot=bot,
+        user_id=order.user_id,
+        order_number=order.order_number,
+        reason=reason,
+        reply_markup=rejection_markup,
+    )
+
+    # Notify Developer in English
+    await notification_service.notify_developer_rejected(bot, order, reason)
 
 
 @router.callback_query(F.data.startswith("owner_reject_menu:"))

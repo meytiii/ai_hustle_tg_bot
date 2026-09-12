@@ -76,6 +76,9 @@ async def init_db(database_url: str) -> None:
                 cols = [row[1] for row in cursor.fetchall()]
                 if cols and "username" not in cols:
                     cursor.execute("ALTER TABLE blocked_users ADD COLUMN username VARCHAR(64);")
+                # Ensure tx_hash index is non-unique
+                cursor.execute("DROP INDEX IF EXISTS ix_orders_tx_hash;")
+                cursor.execute("CREATE INDEX IF NOT EXISTS ix_orders_tx_hash ON orders (tx_hash);")
                 cursor.close()
             await conn.run_sync(migrate_sqlite)
     logger.info("Database initialized successfully with WAL mode enabled.")

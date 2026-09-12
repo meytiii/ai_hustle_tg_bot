@@ -52,8 +52,8 @@ async def test_owner_auth_middleware_blocks_unauthorized_user():
 
 
 @pytest.mark.asyncio
-async def test_replay_attack_duplicate_hash_rejection(order_service: OrderService):
-    """Verifies that an attacker cannot reuse someone else's verified transaction hash."""
+async def test_duplicate_hash_allowed(order_service: OrderService):
+    """Verifies that multiple orders can share or resubmit a transaction hash."""
     order1 = await order_service.create_order(
         user_id=1001,
         username="legit_buyer",
@@ -62,21 +62,23 @@ async def test_replay_attack_duplicate_hash_rejection(order_service: OrderServic
         amount_ton=12.5,
         wallet_address="EQDtest_wallet",
     )
-    victim_tx = "ton_tx_hash_secret_receipt_abc123"
-    await order_service.submit_tx_hash(order1.order_number, victim_tx)
+    tx = "ton_tx_hash_receipt_abc123"
+    await order_service.submit_tx_hash(order1.order_number, tx)
 
-    # Attacker tries to submit the same hash for their order
-    order_attacker = await order_service.create_order(
+    # Another user or order submits the same hash
+    order2 = await order_service.create_order(
         user_id=9999,
-        username="attacker",
-        full_name="Attacker",
+        username="buyer_two",
+        full_name="Buyer Two",
         amount_usd=79.0,
         amount_ton=12.5,
         wallet_address="EQDtest_wallet",
     )
 
-    with pytest.raises(DuplicateTxHashError):
-        await order_service.submit_tx_hash(order_attacker.order_number, victim_tx)
+    # Submitting the same hash should succeed without raising DuplicateTxHashError
+    o2 = await order_service.submit_tx_hash(order2.order_number, tx)
+    assert o2.status == "UNDER_REVIEW"
+    assert o2.tx_hash == tx
 
 
 @pytest.mark.asyncio

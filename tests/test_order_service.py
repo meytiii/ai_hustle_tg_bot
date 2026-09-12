@@ -50,7 +50,7 @@ async def test_order_full_happy_lifecycle(order_service: OrderService):
     # 1. Submit TX hash
     tx_hash = "4a5b6c7d8e9f0123456789abcdef4a5b6c7d8e9f0123456789abcdef4a5b6c7d"
     order = await order_service.submit_tx_hash(order.order_number, tx_hash)
-    assert order.status == OrderStatus.AWAITING_RECEIPT.value
+    assert order.status == OrderStatus.UNDER_REVIEW.value
     assert order.tx_hash == tx_hash
 
     # 2. Submit Receipt screenshot
@@ -69,8 +69,8 @@ async def test_order_full_happy_lifecycle(order_service: OrderService):
 
 
 @pytest.mark.asyncio
-async def test_duplicate_tx_hash_blocked(order_service: OrderService):
-    """Verifies that an already submitted transaction hash cannot be submitted again."""
+async def test_duplicate_tx_hash_allowed(order_service: OrderService):
+    """Verifies that duplicate transaction hashes are allowed without error."""
     order1 = await order_service.create_order(
         user_id=111,
         username="user1",
@@ -79,10 +79,10 @@ async def test_duplicate_tx_hash_blocked(order_service: OrderService):
         amount_ton=12.5,
         wallet_address="EQDtest",
     )
-    same_tx = "unique_tx_hash_12345"
+    same_tx = "common_tx_hash_12345"
     await order_service.submit_tx_hash(order1.order_number, same_tx)
 
-    # Create second order and attempt to submit the exact same tx hash
+    # Create second order and submit the exact same tx hash
     order2 = await order_service.create_order(
         user_id=222,
         username="user2",
@@ -92,8 +92,9 @@ async def test_duplicate_tx_hash_blocked(order_service: OrderService):
         wallet_address="EQDtest",
     )
 
-    with pytest.raises(DuplicateTxHashError):
-        await order_service.submit_tx_hash(order2.order_number, same_tx)
+    o2 = await order_service.submit_tx_hash(order2.order_number, same_tx)
+    assert o2.status == OrderStatus.UNDER_REVIEW.value
+    assert o2.tx_hash == same_tx
 
 
 @pytest.mark.asyncio
